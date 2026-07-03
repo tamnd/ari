@@ -140,10 +140,15 @@ type Log struct {
 }
 
 // ErrorInfo is a client-facing failure with a taxonomy code. A
-// model-correctable mistake is a tool result, never one of these.
+// model-correctable mistake is a tool result, never one of these. Code is
+// core's ErrorKind on the wire; Retryable tells a client whether a retry
+// could help; Cause is an unwrapped underlying detail (doc 01 section 10).
 type ErrorInfo struct {
-	Code string `json:"code"`
-	Text string `json:"text"`
+	Code      string `json:"code"`
+	Message   string `json:"message"`
+	Retryable bool   `json:"retryable"`
+	Ant       string `json:"ant,omitempty"`
+	Cause     string `json:"cause,omitempty"`
 }
 
 // AntSpawned is defined for the wire schema and unused until M3.
