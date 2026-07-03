@@ -1,0 +1,80 @@
+== edit_diff ==
+
+
+
+  ╭──────────────────────────────────────────────────────────────────────────╮
+  │ edit wants to run c1                                                     │
+  │ edit outside the workspace                                               │
+  │                                                                          │
+  │ --- a/main.go                                                            │
+  │ +++ b/main.go                                                            │
+  │ @@ -1,3 +1,3 @@                                                          │
+  │    1    1   package main                                                 │
+  │    2      - var debug = false                                            │
+  │         2 + var debug = true                                             │
+  │                                                                          │
+  │ ▸ deny    allow once    allow for session                                │
+  ╰──────────────────────────────────────────────────────────────────────────╯
+
+
+
+== sh_command ==
+
+
+
+
+
+  ╭──────────────────────────────────────────────────────────────────────────╮
+  │ sh wants to run c2                                                       │
+  │ rm is not on the allowlist                                               │
+  │                                                                          │
+  │ $ rm -rf build/                                                          │
+  │ $ make all                                                               │
+  │                                                                          │
+  │ ↪ allow rm under build/ for this session                                 │
+  │ ▸ deny    allow once    allow for session                                │
+  ╰──────────────────────────────────────────────────────────────────────────╯
+
+
+
+
+== fetch_url ==
+
+
+
+
+
+
+  ╭──────────────────────────────────────────────────────────────────────────╮
+  │ fetch wants to run c3                                                    │
+  │                                                                          │
+  │ https://example.com/api/data                                             │
+  │                                                                          │
+  │ ▸ deny    allow once    allow for session                                │
+  ╰──────────────────────────────────────────────────────────────────────────╯
+
+
+
+
+
+
+== json_fullauto ==
+
+
+
+
+  ╭──────────────────────────────────────────────────────────────────────────╮
+  │ deploy wants to run c4                                                   │
+  │ deploy always asks                                                       │
+  │ ! mode full-auto asked anyway: this action needs an explicit answer      │
+  │                                                                          │
+  │ {                                                                        │
+  │   "target": "prod"                                                       │
+  │ }                                                                        │
+  │                                                                          │
+  │ ▸ deny    allow once    allow for session                                │
+  ╰──────────────────────────────────────────────────────────────────────────╯
+
+
+
+
