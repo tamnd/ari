@@ -1,0 +1,4 @@
+short line
+this is a deliberately wide line that keeps going and going and going and going so the TUI pane has something to scroll horizontally
+
+exit code 3
