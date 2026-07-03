@@ -1,0 +1,18 @@
+# Sample Page
+
+# The Article
+
+A paragraph with a [useful link](https://example.com/doc) and some `inline code`.
+
+## Details
+
+- first point
+- second point
+
+```
+func main() {
+	fmt.Println("hi")
+}
+```
+
+Closing text.
