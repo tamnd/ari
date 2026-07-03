@@ -1,0 +1,56 @@
+== wide ==
+compact=false
+header   x=0 y=0 w=0 h=0
+sidebar  x=130 y=0 w=30 h=44
+main     x=0 y=0 w=130 h=44
+pills    x=0 y=44 w=160 h=0
+editor   x=0 y=44 w=160 h=3
+status   x=0 y=47 w=160 h=1
+== just_above ==
+compact=false
+header   x=0 y=0 w=0 h=0
+sidebar  x=90 y=0 w=30 h=26
+main     x=0 y=0 w=90 h=26
+pills    x=0 y=26 w=120 h=0
+editor   x=0 y=26 w=120 h=3
+status   x=0 y=29 w=120 h=1
+== narrow ==
+compact=true
+header   x=0 y=0 w=119 h=1
+sidebar  x=0 y=0 w=0 h=0
+main     x=0 y=1 w=119 h=43
+pills    x=0 y=44 w=119 h=0
+editor   x=0 y=44 w=119 h=3
+status   x=0 y=47 w=119 h=1
+== short ==
+compact=true
+header   x=0 y=0 w=160 h=1
+sidebar  x=0 y=0 w=0 h=0
+main     x=0 y=1 w=160 h=24
+pills    x=0 y=25 w=160 h=0
+editor   x=0 y=25 w=160 h=3
+status   x=0 y=28 w=160 h=1
+== forced ==
+compact=true
+header   x=0 y=0 w=160 h=1
+sidebar  x=0 y=0 w=0 h=0
+main     x=0 y=1 w=160 h=43
+pills    x=0 y=44 w=160 h=0
+editor   x=0 y=44 w=160 h=3
+status   x=0 y=47 w=160 h=1
+== grown_editor ==
+compact=false
+header   x=0 y=0 w=0 h=0
+sidebar  x=130 y=0 w=30 h=39
+main     x=0 y=0 w=130 h=39
+pills    x=0 y=39 w=160 h=0
+editor   x=0 y=39 w=160 h=8
+status   x=0 y=47 w=160 h=1
+== tiny ==
+compact=true
+header   x=0 y=0 w=40 h=1
+sidebar  x=0 y=0 w=0 h=0
+main     x=0 y=1 w=40 h=5
+pills    x=0 y=6 w=40 h=0
+editor   x=0 y=6 w=40 h=3
+status   x=0 y=9 w=40 h=1

@@ -17,6 +17,14 @@ type Meta struct {
 	Turn    string
 }
 
+// BusMeta exposes the envelope through one interface, so a consumer can
+// read attribution off any bus message without a type switch per type.
+func (m Meta) BusMeta() Meta { return m }
+
+// Enveloped is any message carrying a Meta; every type below qualifies
+// through embedding.
+type Enveloped interface{ BusMeta() Meta }
+
 // One message type per M0 event type. Each embeds the core's payload
 // struct, so the UI reads the same fields the journal recorded and there
 // is no second schema to drift (D2).

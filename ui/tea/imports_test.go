@@ -32,10 +32,11 @@ func TestImportGraph(t *testing.T) {
 		switch {
 		case strings.HasPrefix(short, "cmd/"), short == "cmd":
 			// main wires both sides together; no constraint.
-		case strings.HasPrefix(short, "ui/"):
+		case strings.HasPrefix(short, "ui/"), short == "ui":
 			for _, imp := range imports {
 				if strings.HasPrefix(imp, mod) &&
 					!strings.HasPrefix(imp, mod+"ui/") &&
+					imp != mod+"ui" &&
 					!uiAllowedCore[imp] {
 					t.Errorf("%s imports core package %s; the UI talks to the core over the bus, not by import", pkg, imp)
 				}
