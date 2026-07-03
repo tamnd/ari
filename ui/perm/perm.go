@@ -177,4 +177,3 @@ func (d *Dialog) consequence(width, maxLines int) []string {
 	}
 	return out
 }
-

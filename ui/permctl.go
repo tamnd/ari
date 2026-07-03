@@ -38,15 +38,15 @@ func (p *PermController) SetTheme(th theme.Theme) { p.th = th }
 
 // Request pushes a dialog for an incoming permission request.
 func (p *PermController) Request(m bus.PermissionRequestedMsg, overlay *dialog.Overlay, now time.Time) {
-	p.sessions[m.PermissionRequested.ID] = m.Session
+	p.sessions[m.ID] = m.Session
 	overlay.Push(perm.New(m.PermissionRequested, p.th), now)
 }
 
 // Resolved pops the dialog when the core resolved the request some
 // other way, a rule or a timeout, so a stale prompt never lingers.
 func (p *PermController) Resolved(m bus.PermissionResolvedMsg, overlay *dialog.Overlay, now time.Time) {
-	delete(p.sessions, m.PermissionResolved.ID)
-	if d := overlay.Active(); d != nil && d.ID() == "perm:"+m.PermissionResolved.ID {
+	delete(p.sessions, m.ID)
+	if d := overlay.Active(); d != nil && d.ID() == "perm:"+m.ID {
 		overlay.Pop(now)
 	}
 }

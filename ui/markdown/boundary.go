@@ -58,7 +58,6 @@ func findSafeBoundary(source string, from int) int {
 // blocks and the raw HTML blocks that run to an explicit closer.
 type scanState struct {
 	fence     string // the opening fence marker, "" when closed
-	fenceLen  int
 	htmlUntil string // the closer a raw HTML block is waiting for
 	hazard    bool   // a reference-link hazard poisons the whole rest
 }

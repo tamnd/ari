@@ -40,17 +40,17 @@ type Options struct {
 	Client        Client
 	Theme         theme.Theme
 	Keys          keys.Map
-	FirstRun      bool                        // no config and no nest: run onboarding
-	Cwd           string                      // shown in the sidebar
-	Model         string                      // the configured model, pre-ledger
-	Provider      string                      // the configured provider
-	Effort        string                      // reasoning effort, empty when unset
-	Models        []string                    // pickable models for the picker
-	ContextWindow int64                       // tokens, for the context fill figure
-	Session       string                      // resume: next turns go here, "" starts fresh
-	Drops         func() uint64               // the broker's lossy-lane drop counter
-	Onboarded     func(splash.Outcome) error  // persists first-run choices
-	Now           func() time.Time            // tests pin this
+	FirstRun      bool                       // no config and no nest: run onboarding
+	Cwd           string                     // shown in the sidebar
+	Model         string                     // the configured model, pre-ledger
+	Provider      string                     // the configured provider
+	Effort        string                     // reasoning effort, empty when unset
+	Models        []string                   // pickable models for the picker
+	ContextWindow int64                      // tokens, for the context fill figure
+	Session       string                     // resume: next turns go here, "" starts fresh
+	Drops         func() uint64              // the broker's lossy-lane drop counter
+	Onboarded     func(splash.Outcome) error // persists first-run choices
+	Now           func() time.Time           // tests pin this
 }
 
 // Model is the root program: the only tea.Model in the tree. It owns

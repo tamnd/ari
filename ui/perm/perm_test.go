@@ -57,7 +57,7 @@ var reqs = map[string]event.PermissionRequested{
 func frameOf(d *Dialog, w, h int) string {
 	buf := uv.NewScreenBuffer(w, h)
 	d.Draw(buf, uv.Rect(0, 0, w, h))
-	return buf.Buffer.String()
+	return buf.String()
 }
 
 // TestDrawGolden pins one frame per consequence kind, plus the

@@ -17,7 +17,7 @@ func sketch(l Layout) string {
 		return fmt.Sprintf("%-8s x=%d y=%d w=%d h=%d\n", name, r.Min.X, r.Min.Y, r.Dx(), r.Dy())
 	}
 	var b strings.Builder
-	b.WriteString(fmt.Sprintf("compact=%v\n", l.Compact))
+	fmt.Fprintf(&b, "compact=%v\n", l.Compact)
 	b.WriteString(r("header", l.Header))
 	b.WriteString(r("sidebar", l.Sidebar))
 	b.WriteString(r("main", l.Main))

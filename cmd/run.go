@@ -45,7 +45,7 @@ func runTUI(c *cobra.Command) error {
 	if err != nil {
 		return err
 	}
-	defer colony.Close()
+	defer func() { _ = colony.Close() }()
 	runner.Bind(colony)
 
 	// Subscribe before Start so the hello is the first thing seen.

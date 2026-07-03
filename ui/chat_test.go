@@ -96,7 +96,7 @@ func TestChatGolden(t *testing.T) {
 	c := feed(t)
 	buf := uv.NewScreenBuffer(72, 24)
 	c.Draw(buf, buf.Bounds())
-	eval.Golden(t, "conversation", buf.Buffer.String())
+	eval.Golden(t, "conversation", buf.String())
 }
 
 // TestLandingShowsWordmark: an empty chat draws the logo, not a blank
@@ -105,7 +105,7 @@ func TestLandingShowsWordmark(t *testing.T) {
 	c := NewChat(theme.Dark(), time.Now)
 	buf := uv.NewScreenBuffer(72, 24)
 	c.Draw(buf, buf.Bounds())
-	out := buf.Buffer.String()
+	out := buf.String()
 	if !strings.Contains(out, "type a prompt to start") {
 		t.Fatalf("landing pane missing the hint:\n%s", out)
 	}

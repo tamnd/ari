@@ -115,7 +115,7 @@ func writePrompt(content string) (string, error) {
 		werr = cerr
 	}
 	if werr != nil {
-		os.Remove(path)
+		_ = os.Remove(path)
 		return "", werr
 	}
 	return path, nil
@@ -126,7 +126,7 @@ func writePrompt(content string) (string, error) {
 func reload(path string) btea.ExecCallback {
 	return func(execErr error) btea.Msg {
 		data, readErr := os.ReadFile(path)
-		os.Remove(path)
+		_ = os.Remove(path)
 		if execErr != nil {
 			return EditorClosed{Err: execErr}
 		}
