@@ -1,0 +1,60 @@
+== tall ==
+ari アリ
+
+/home/tam/github/tamnd/ari
+
+claude-sonnet-5 (high)
+anthropic
+context  42%  $1.23
+
+◆ one ant, awake
+
+modified
+core/session.go        +120 -8
+ui/sidebar/sidebar.go   +44 -0
+event/payloads.go        +3 -3
+
+
+
+
+
+
+
+
+
+== short ==
+ari アリ
+
+/home/tam/github/tamnd/ari
+
+claude-sonnet-5 (high)
+anthropic
+context  42%  $1.23
+
+◆ one ant, awake
+
+modified
+… 3 more== debug ==
+ari アリ
+
+/home/tam/github/tamnd/ari
+
+claude-sonnet-5 (high)
+anthropic
+context  42%  $1.23
+
+◆ one ant, awake
+
+modified
+core/session.go        +120 -8
+ui/sidebar/sidebar.go   +44 -0
+event/payloads.go        +3 -3
+bus drops 17
+
+
+
+
+
+
+
+
