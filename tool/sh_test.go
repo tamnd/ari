@@ -228,7 +228,7 @@ func TestShOutputSpillsAtItsCap(t *testing.T) {
 	if len(res.Model) <= shMaxResult {
 		t.Fatalf("the fixture must overflow the cap, got %d bytes", len(res.Model))
 	}
-	got, err := ApplyResultBudget(res, s, tc)
+	got, _, err := ApplyResultBudget(res, s, tc)
 	if err != nil {
 		t.Fatalf("budget: %v", err)
 	}
