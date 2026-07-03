@@ -51,6 +51,15 @@ func (f *FileState) Set(path, hash string, mtime time.Time, lines int) {
 	f.files[path] = FileEntry{Hash: hash, Mtime: mtime, Lines: lines}
 }
 
+// Clear empties the map. Compaction calls it before rebuilding the map
+// for the restored working set (D8, doc 03 section 11): the ant only
+// remembers reading what it actually re-read.
+func (f *FileState) Clear() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.files = make(map[string]FileEntry)
+}
+
 // Apply folds a tool's FileStateEffect into the map. The loop calls it
 // after every successful call that returned one.
 func (f *FileState) Apply(e *FileStateEffect) {

@@ -60,15 +60,16 @@ func (s *DiskSpill) Sweep() error {
 // becomes a tool_result. The preview is head-heavy on purpose: the
 // first three quarters of the budget is the head, the last quarter the
 // tail, because the top of a command's output is usually what matters
-// (doc 04 section 3.2).
-func ApplyResultBudget(r *Result, t Tool, tc *ToolContext) (string, error) {
+// (doc 04 section 3.2). The returned ref is the zero value when
+// nothing spilled; the loop surfaces it on the tool end event.
+func ApplyResultBudget(r *Result, t Tool, tc *ToolContext) (string, SpillRef, error) {
 	max := t.MaxResultSize()
 	if max == 0 || len(r.Model) <= max {
-		return r.Model, nil // no cap, or under it
+		return r.Model, SpillRef{}, nil // no cap, or under it
 	}
 	ref, err := tc.Spill.Put(r.Model)
 	if err != nil {
-		return "", err
+		return "", SpillRef{}, err
 	}
 	head := r.Model[:max*3/4]
 	tail := r.Model[len(r.Model)-max/4:]
@@ -76,5 +77,5 @@ func ApplyResultBudget(r *Result, t Tool, tc *ToolContext) (string, error) {
 		"%s\n\n[%d bytes total, truncated. Full output at %s. "+
 			"Read it with read(%q) or grep it with find.]\n\n%s",
 		head, len(r.Model), ref.Path, ref.Path, tail,
-	), nil
+	), ref, nil
 }

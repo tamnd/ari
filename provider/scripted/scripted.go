@@ -15,13 +15,16 @@ import (
 )
 
 // Response is one scripted model reply, the shape stored in a replay
-// set's responses array (kernel/eval Script).
+// set's responses array (kernel/eval Script). A non-nil Fail makes the
+// call error with that classification instead of streaming, so loop
+// tests script retries, fallbacks, and circuit breakers (doc 03).
 type Response struct {
 	Text     string              `json:"text,omitempty"`
 	Thinking string              `json:"thinking,omitempty"`
 	Calls    []provider.ToolCall `json:"calls,omitempty"`
 	Usage    provider.Usage      `json:"usage"`
 	Stop     string              `json:"stop"`
+	Fail     *provider.Error     `json:"fail,omitempty"`
 }
 
 // Provider plays responses in order, one per Stream call.
@@ -80,6 +83,10 @@ func (p *Provider) Stream(ctx context.Context, req provider.Request, sink provid
 	r := p.responses[p.next]
 	p.next++
 	p.mu.Unlock()
+
+	if r.Fail != nil {
+		return provider.Result{}, r.Fail
+	}
 
 	if r.Thinking != "" {
 		sink.OnThinking(r.Thinking)

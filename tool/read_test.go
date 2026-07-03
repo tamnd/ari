@@ -175,7 +175,7 @@ func TestReadNeverSpills(t *testing.T) {
 		t.Fatalf("read: %v", err)
 	}
 
-	capped, err := ApplyResultBudget(res, r, tc)
+	capped, _, err := ApplyResultBudget(res, r, tc)
 	if err != nil {
 		t.Fatalf("budget: %v", err)
 	}

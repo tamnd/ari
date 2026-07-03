@@ -35,7 +35,7 @@ func TestOversizedResultSpillsWithHeadHeavyPreview(t *testing.T) {
 	full := head + middle + tail
 
 	r := &Result{Model: full}
-	got, err := ApplyResultBudget(r, cappedTool{}, tc)
+	got, _, err := ApplyResultBudget(r, cappedTool{}, tc)
 	if err != nil {
 		t.Fatalf("budget: %v", err)
 	}
@@ -78,7 +78,7 @@ func TestOversizedResultSpillsWithHeadHeavyPreview(t *testing.T) {
 func TestAResultUnderTheCapPassesThrough(t *testing.T) {
 	tc := testContext(t)
 	r := &Result{Model: "short output"}
-	got, err := ApplyResultBudget(r, cappedTool{}, tc)
+	got, _, err := ApplyResultBudget(r, cappedTool{}, tc)
 	if err != nil {
 		t.Fatalf("budget: %v", err)
 	}
@@ -95,7 +95,7 @@ func TestUIDisplayNeverReachesTheModel(t *testing.T) {
 	const marker = "UI-ONLY-MARKER-a2c39f"
 
 	small := &Result{Model: "model text", Display: map[string]string{"rich": marker}}
-	got, err := ApplyResultBudget(small, cappedTool{}, tc)
+	got, _, err := ApplyResultBudget(small, cappedTool{}, tc)
 	if err != nil {
 		t.Fatalf("budget: %v", err)
 	}
@@ -104,7 +104,7 @@ func TestUIDisplayNeverReachesTheModel(t *testing.T) {
 	}
 
 	big := &Result{Model: strings.Repeat("x", 5000), Display: map[string]string{"rich": marker}}
-	got, err = ApplyResultBudget(big, cappedTool{}, tc)
+	got, _, err = ApplyResultBudget(big, cappedTool{}, tc)
 	if err != nil {
 		t.Fatalf("budget: %v", err)
 	}
