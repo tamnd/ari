@@ -1,0 +1,2 @@
+<root>/cmd/main.go:3: func main() { run() }
+<root>/run.go:3: func run() {}
