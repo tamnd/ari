@@ -5,8 +5,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 
 	"github.com/tamnd/ari/event"
@@ -15,7 +17,9 @@ import (
 
 // Pipeline evaluates every tool call through the eight ordered stages.
 // One value serves a whole session; it is safe for concurrent use when
-// its fields are not mutated after construction.
+// its fields are not mutated after construction. The one sanctioned
+// mutation is AddAllow, which "allow for session" rides and which takes
+// the rules lock the evaluator reads under.
 type Pipeline struct {
 	Rules Rules
 	Mode  Mode
@@ -30,7 +34,24 @@ type Pipeline struct {
 	// permission.resolved pair every decision emits (doc 05 section 15).
 	Journal tool.Journal
 
-	reqID atomic.Uint64
+	reqID   atomic.Uint64
+	rulesMu sync.RWMutex // guards Rules; parallel reads decide concurrently
+}
+
+// AddAllow appends session-layer allow rules, the durable half of an
+// "allow for session" answer. Clip forces the append to reallocate so a
+// concurrently taken snapshot never sees its backing array written.
+func (p *Pipeline) AddAllow(rules ...Rule) {
+	p.rulesMu.Lock()
+	defer p.rulesMu.Unlock()
+	p.Rules.Allow = append(slices.Clip(p.Rules.Allow), rules...)
+}
+
+// ruleset snapshots the rules for one evaluation.
+func (p *Pipeline) ruleset() Rules {
+	p.rulesMu.RLock()
+	defer p.rulesMu.RUnlock()
+	return p.Rules
 }
 
 // Call is one tool invocation under decision.
@@ -164,10 +185,11 @@ func (p *Pipeline) evalShell(ctx context.Context, call Call, subs []tool.ShSub) 
 // order at runtime (D15, doc 05 section 3).
 func (p *Pipeline) evaluate(ctx context.Context, u unit) Decision {
 	toolPreApproved := false
+	rules := p.ruleset()
 
 	// Stage 1: deny rules. A matching deny is final and nothing below
 	// can lift it.
-	if r, ok := p.matchRules(p.Rules.Deny, u, anyContent); ok {
+	if r, ok := p.matchRules(rules.Deny, u, anyContent); ok {
 		return Decision{
 			Behavior: Deny,
 			Reason:   Reason{Kind: KindRule, Stage: StageDeny, Rule: r.Pattern.Source},
@@ -177,7 +199,7 @@ func (p *Pipeline) evaluate(ctx context.Context, u unit) Decision {
 
 	// Stage 2: tool-wide ask. "ask before any sh at all" lives here,
 	// above any narrower allow rule.
-	if r, ok := p.matchRules(p.Rules.Ask, u, toolWideOnly); ok {
+	if r, ok := p.matchRules(rules.Ask, u, toolWideOnly); ok {
 		return askDecision(
 			Reason{Kind: KindRule, Stage: StageToolAsk, Rule: r.Pattern.Source},
 			fmt.Sprintf("the rule %s asks before every %s call", r.Pattern.Source, u.name),
@@ -201,7 +223,7 @@ func (p *Pipeline) evaluate(ctx context.Context, u unit) Decision {
 
 	// Stage 4: content-ask rules, e.g. sh(npm publish:*) or
 	// write(**/*.pem), honored even in a permissive mode.
-	if r, ok := p.matchRules(p.Rules.Ask, u, contentOnly); ok {
+	if r, ok := p.matchRules(rules.Ask, u, contentOnly); ok {
 		return askDecision(
 			Reason{Kind: KindContent, Stage: StageContentAsk, Rule: r.Pattern.Source},
 			fmt.Sprintf("the rule %s asks about this call", r.Pattern.Source),
@@ -229,7 +251,7 @@ func (p *Pipeline) evaluate(ctx context.Context, u unit) Decision {
 	if toolPreApproved {
 		return Decision{Behavior: Allow, Reason: Reason{Kind: KindTool, Stage: StageToolCheck}}
 	}
-	if r, ok := p.matchRules(p.Rules.Allow, u, anyContent); ok {
+	if r, ok := p.matchRules(rules.Allow, u, anyContent); ok {
 		return Decision{Behavior: Allow, Reason: Reason{Kind: KindRule, Stage: StageAllow, Rule: r.Pattern.Source}}
 	}
 
