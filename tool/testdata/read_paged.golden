@@ -1,0 +1,4 @@
+     5	func main() {
+     6		fmt.Println("hi")
+
+(showing lines 5-6 of 7; continue with offset=7)
