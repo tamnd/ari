@@ -118,11 +118,15 @@ type PermissionRequested struct {
 }
 
 // PermissionResolved records how a permission decision landed and why.
+// Kind names the machinery that decided (rule, safety, headless, ...),
+// so a client can tell a headless auto-deny from a user's no without
+// parsing the prose.
 type PermissionResolved struct {
 	ID       string `json:"id"`
 	Behavior string `json:"behavior"` // allow, deny
 	Stage    string `json:"stage"`
 	Rule     string `json:"rule,omitempty"`
+	Kind     string `json:"kind,omitempty"`
 	Reason   string `json:"reason,omitempty"`
 }
 

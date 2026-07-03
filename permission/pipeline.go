@@ -81,6 +81,11 @@ type Resolution struct {
 	Behavior     Behavior
 	UpdatedInput json.RawMessage
 	Message      string
+
+	// Kind, when set on a deny, names which machinery answered instead
+	// of a person; the headless auto-deny sets KindHeadless so clients
+	// and exit codes can tell it apart from a user's no.
+	Kind ReasonKind
 }
 
 // Resolver answers an Ask. Returning ok=false abstains, leaving the
@@ -397,6 +402,9 @@ func (p *Pipeline) applyResolution(call Call, d Decision, res Resolution) Decisi
 		if res.Message != "" {
 			d.Message = res.Message
 		}
+		if res.Kind != "" {
+			d.Reason.Kind = res.Kind
+		}
 		return d
 	}
 	if len(res.UpdatedInput) > 0 && !narrows(call.Tool.Name(), call.Input, res.UpdatedInput) {
@@ -570,6 +578,7 @@ func (p *Pipeline) emitResolved(call Call, reqID string, d Decision) {
 		Behavior: string(d.Behavior),
 		Stage:    string(d.Reason.Stage),
 		Rule:     d.Reason.Rule,
+		Kind:     string(d.Reason.Kind),
 		Reason:   d.Message,
 	})
 	if err == nil {

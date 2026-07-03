@@ -90,6 +90,12 @@ const (
 	KindMode    ReasonKind = "mode"    // a mode transform decided
 	KindDefault ReasonKind = "default" // fell through to the default ask
 	KindSubcmd  ReasonKind = "subcmd"  // compound sh; Sub has the breakdown
+
+	// KindHeadless is a headless run's resolver of last resort claiming
+	// an Ask with a deny. The default for a headless Ask is deny, never
+	// allow: an allow-by-default here is exactly how an automated agent
+	// runs a command nobody reviewed (doc 05 section 11, D16).
+	KindHeadless ReasonKind = "headless"
 )
 
 // Stage names a pipeline stage; the order here is the runtime order.

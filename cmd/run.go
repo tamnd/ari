@@ -191,9 +191,3 @@ func onboarded(n nest.Nest) func(splash.Outcome) error {
 		return nil
 	}
 }
-
-// runHeadless runs one turn against the core and exits. The real client
-// lands with the headless slice.
-func runHeadless(_ *cobra.Command, _ string) error {
-	return notYet("ari -p", "a later M0 slice in this milestone")
-}

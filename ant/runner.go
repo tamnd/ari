@@ -45,6 +45,7 @@ type Runner struct {
 	config   *coreConfig
 	nest     nest.Nest
 	asks     Asker
+	headless bool
 	bound    bool
 
 	mu      sync.Mutex
@@ -91,13 +92,16 @@ func (r *Runner) Bind(c *core.Colony) {
 	r.bound = true
 }
 
-// Headless drops the interactive resolver, so every Ask that reaches
-// the pipeline stands and the loop refuses the call instead of blocking
-// on a prompt nobody can see (doc 05 section 3).
+// Headless swaps the interactive resolver for the resolver of last
+// resort: every Ask that reaches the pipeline is claimed with a deny
+// carrying KindHeadless, so the run never blocks on a prompt nobody can
+// see and never runs a call nobody reviewed (doc 05 section 11). Call
+// it after Bind and before Start.
 func (r *Runner) Headless() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.asks = nil
+	r.headless = true
 }
 
 // RunTurn implements core.TurnRunner: it wakes or finds the session's
@@ -171,15 +175,18 @@ func (r *Runner) wake(ctx context.Context, t *core.TurnHandle) (*worker, error) 
 	if resolved, rerr := filepath.EvalSymlinks(self); rerr == nil && resolved != "" {
 		self = resolved
 	}
+	// The floor compares symlink-resolved mutation targets, so the
+	// protected paths resolve the same way; otherwise a root behind a
+	// symlink (macOS /var -> /private/var) hides the nest from it.
 	pipe := &permission.Pipeline{
 		Mode: permission.Mode(r.config.mode),
 		Paths: permission.Paths{
-			Root:         r.nest.Root,
-			Nest:         r.nest.ProjectDir(),
-			GlobalNest:   r.nest.Global,
-			Home:         home,
+			Root:         tool.ResolveMutationPath(r.nest.Root),
+			Nest:         tool.ResolveMutationPath(r.nest.ProjectDir()),
+			GlobalNest:   tool.ResolveMutationPath(r.nest.Global),
+			Home:         tool.ResolveMutationPath(home),
 			AriBinary:    self,
-			GlobalConfig: r.nest.GlobalConfig(),
+			GlobalConfig: tool.ResolveMutationPath(r.nest.GlobalConfig()),
 		},
 	}
 
@@ -190,6 +197,7 @@ func (r *Runner) wake(ctx context.Context, t *core.TurnHandle) (*worker, error) 
 		session:     string(t.Session),
 		defaultMode: permission.Mode(r.config.mode),
 		asks:        r.asks,
+		headless:    r.headless,
 	}
 	pipe.Resolver = permission.ResolverFunc(w.resolve)
 	w.loop = &agent.Loop{
@@ -265,13 +273,25 @@ type worker struct {
 	session     string
 	defaultMode permission.Mode
 	asks        Asker
+	headless    bool
 	turnID      string
 }
 
-// resolve blocks the pipeline's Ask on the client's answer. With no
-// asker, or when the turn is cancelled under the prompt, it abstains
-// and the standing Ask becomes the refusal decide maps to a verdict.
+// resolve blocks the pipeline's Ask on the client's answer. A headless
+// run has nobody to ask, so it claims the Ask with a deny carrying
+// KindHeadless: the default for a headless Ask is deny, never allow
+// (doc 05 section 11). When the turn is cancelled under the prompt it
+// abstains and the standing Ask becomes the refusal decide maps to a
+// verdict.
 func (w *worker) resolve(ctx context.Context, req *permission.Request) (permission.Resolution, bool) {
+	if w.headless {
+		return permission.Resolution{
+			Behavior: permission.Deny,
+			Kind:     permission.KindHeadless,
+			Message: "this is a headless run with nobody to ask, so the call was denied; " +
+				"add an allow rule for it or rerun with --mode full-auto",
+		}, true
+	}
 	if w.asks == nil {
 		return permission.Resolution{}, false
 	}
@@ -320,7 +340,8 @@ func (w *worker) runTurn(ctx context.Context, t *core.TurnHandle) error {
 	if t.Request.Mode != "" {
 		w.pipe.Mode = permission.Mode(t.Request.Mode)
 	}
-	_, err := w.loop.Run(ctx, t.Request.Text)
+	out, err := w.loop.Run(ctx, t.Request.Text)
+	t.Reason = string(out.Reason)
 	return err
 }
 
