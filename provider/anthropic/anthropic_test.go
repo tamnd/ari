@@ -204,3 +204,22 @@ func TestStreamErrorEventFailsTheTurn(t *testing.T) {
 		t.Errorf("want the stream error surfaced, got: %v", err)
 	}
 }
+
+func TestMessageBlockCacheBreakpoint(t *testing.T) {
+	body := buildBody(provider.Request{
+		Messages: []provider.Message{{
+			Role: "user",
+			Blocks: []provider.MsgBlock{
+				{Kind: "text", Text: "pinned index"},
+				{Kind: "text", Text: "project memory", Cache: true},
+			},
+		}},
+	})
+	blocks := body.Messages[0].Content
+	if blocks[0].Cache != nil {
+		t.Error("an unmarked message block must carry no cache_control")
+	}
+	if blocks[1].Cache == nil || blocks[1].Cache.Type != "ephemeral" {
+		t.Error("a marked message block must render cache_control ephemeral (D14)")
+	}
+}

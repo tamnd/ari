@@ -157,6 +157,9 @@ func toWireMessage(m provider.Message) wireMessage {
 		default:
 			out.Content = append(out.Content, wireBlock{Type: "text", Text: b.Text})
 		}
+		if b.Cache {
+			out.Content[len(out.Content)-1].Cache = &cacheControl{Type: "ephemeral"}
+		}
 	}
 	return out
 }
