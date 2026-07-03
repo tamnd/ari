@@ -102,8 +102,14 @@ func TestUnknownKeyWarnsNotCrashes(t *testing.T) {
 
 func TestMissingEnvForReferencedProvider(t *testing.T) {
 	if old, had := os.LookupEnv("ANTHROPIC_API_KEY"); had {
-		os.Unsetenv("ANTHROPIC_API_KEY")
-		t.Cleanup(func() { os.Setenv("ANTHROPIC_API_KEY", old) })
+		if err := os.Unsetenv("ANTHROPIC_API_KEY"); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() {
+			if err := os.Setenv("ANTHROPIC_API_KEY", old); err != nil {
+				t.Error(err)
+			}
+		})
 	}
 	n := testNest(t, "", "", "")
 	_, err := Load(n, FlagOverrides{})
