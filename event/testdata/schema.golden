@@ -3,7 +3,7 @@ schema major 1
 envelope Event: v:int, seq:int, type:string, session?:string, turn?:string, time:time, payload?:raw
 
 ant.spawned: id:string, card:string
-error: code:string, text:string
+error: code:string, message:string, retryable:bool, ant?:string, cause?:string
 hello: schema:int, cursor:int, server:string
 ledger.turn: turn:string, model:string, input:int, output:int, cache_read:int, cache_write:int, cost_usd:float, cache_rate:float
 log: level:string, text:string
