@@ -59,6 +59,14 @@ func (writeTool) Schema() Schema {
 
 func (writeTool) MaxResultSize() int { return writeMaxResult }
 
+// MatchPrefix matches rule content against the target path, so a rule
+// like write(/src/:*) or write(**/*.pem) can single out paths.
+func (writeTool) MatchPrefix(raw json.RawMessage) PrefixMatcher {
+	var a writeArgs
+	_ = json.Unmarshal(raw, &a)
+	return contentMatcher{value: a.FilePath}
+}
+
 func (writeTool) ValidateInput(_ context.Context, raw json.RawMessage, _ *ToolContext) error {
 	var a writeArgs
 	if err := json.Unmarshal(raw, &a); err != nil {

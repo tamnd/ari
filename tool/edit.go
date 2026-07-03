@@ -61,6 +61,14 @@ func (editTool) Schema() Schema {
 
 func (editTool) MaxResultSize() int { return editMaxResult }
 
+// MatchPrefix matches rule content against the target path, so a rule
+// like edit(/src/:*) or edit(**/*.pem) can single out paths.
+func (editTool) MatchPrefix(raw json.RawMessage) PrefixMatcher {
+	var a editArgs
+	_ = json.Unmarshal(raw, &a)
+	return contentMatcher{value: a.FilePath}
+}
+
 // ValidateInput runs the gate and the uniqueness check so the model
 // gets its teaching rejection before permissions ever ask a human.
 // Call re-verifies everything under the lock because the world can

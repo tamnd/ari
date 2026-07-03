@@ -15,7 +15,7 @@ part.thinking.end: part:int, duration_ms:int
 part.tool.end: part:int, call:string, tool:string, ok:bool, display:string, spilled?:string
 part.tool.progress: part:int, call:string, text:string
 part.tool.start: part:int, call:string, tool:string, input:string
-permission.requested: id:string, call:string, tool:string, consequence:{kind:string, content:string}, suggestions?:[]string
+permission.requested: id:string, call:string, tool:string, consequence:{kind:string, content:string}, suggestions?:[]string, mode?:string, reason?:string
 permission.resolved: id:string, behavior:string, stage:string, rule?:string, reason?:string
 route.decided: task:string, ant:string, why:string
 session.created: id:string, title?:string, parent?:string, root:string

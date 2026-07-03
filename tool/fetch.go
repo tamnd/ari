@@ -72,6 +72,14 @@ func (fetchTool) MaxResultSize() int { return fetchMaxResult }
 func (fetchTool) IsReadOnly(json.RawMessage) bool        { return true }
 func (fetchTool) IsConcurrencySafe(json.RawMessage) bool { return true }
 
+// MatchPrefix matches rule content against the URL, so a rule like
+// fetch(https://internal.corp:*) can single out destinations.
+func (fetchTool) MatchPrefix(raw json.RawMessage) PrefixMatcher {
+	var a fetchArgs
+	_ = json.Unmarshal(raw, &a)
+	return contentMatcher{value: a.URL}
+}
+
 func (fetchTool) ValidateInput(_ context.Context, raw json.RawMessage, _ *ToolContext) error {
 	var a fetchArgs
 	if err := json.Unmarshal(raw, &a); err != nil {

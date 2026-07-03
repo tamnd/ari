@@ -116,9 +116,11 @@ type FileStateEffect struct {
 
 // PermissionResult is a tool's contribution to the permission pipeline.
 // The pipeline (doc 05, slice 7) weighs it together with rules and mode;
-// a tool cannot allow past a safety check from here (D15).
+// a tool cannot allow past a safety check from here (D15): an allow sets
+// a pre-approval flag and still faces the safety floor.
 type PermissionResult struct {
-	kind string
+	kind    string
+	message string
 }
 
 // Passthrough means the tool has no opinion and the general rule and
@@ -126,8 +128,35 @@ type PermissionResult struct {
 // every tool that has nothing early to say.
 func Passthrough() PermissionResult { return PermissionResult{kind: "passthrough"} }
 
+// AllowResult means the tool pre-approves this call. The pipeline still
+// runs the safety floor before the approval lands.
+func AllowResult() PermissionResult { return PermissionResult{kind: "allow"} }
+
+// DenyResult means the tool refuses this call; the message tells the
+// model why.
+func DenyResult(message string) PermissionResult {
+	return PermissionResult{kind: "deny", message: message}
+}
+
+// AskResult means the tool wants a human to decide this call.
+func AskResult(message string) PermissionResult {
+	return PermissionResult{kind: "ask", message: message}
+}
+
 // IsPassthrough reports whether the tool deferred entirely.
 func (p PermissionResult) IsPassthrough() bool { return p.kind == "passthrough" || p.kind == "" }
+
+// IsAllow reports a tool pre-approval.
+func (p PermissionResult) IsAllow() bool { return p.kind == "allow" }
+
+// IsDeny reports a tool refusal.
+func (p PermissionResult) IsDeny() bool { return p.kind == "deny" }
+
+// IsAsk reports a tool escalation to a human.
+func (p PermissionResult) IsAsk() bool { return p.kind == "ask" }
+
+// Message is the model-facing sentence for deny and ask.
+func (p PermissionResult) Message() string { return p.message }
 
 // Pattern is one permission rule pattern, kept as the user wrote it. The
 // rule language proper lands with the pipeline (doc 05); tools only need
@@ -142,7 +171,8 @@ type Pattern struct {
 // one normalized subcommand. Empty content is tool-wide and covers
 // everything; "git commit:*" covers "git commit" and anything after it
 // at a word boundary, so "git commit -m x" matches and "git commitx"
-// does not; content without the :* wildcard must match exactly.
+// does not; content with an inline * is a wildcard matched against the
+// whole subcommand; content with neither must match exactly.
 func (p Pattern) CoversSubcommand(sub string) bool {
 	if p.Content == "" {
 		return true
@@ -150,7 +180,58 @@ func (p Pattern) CoversSubcommand(sub string) bool {
 	if prefix, ok := strings.CutSuffix(p.Content, ":*"); ok {
 		return sub == prefix || strings.HasPrefix(sub, prefix+" ")
 	}
+	if strings.ContainsRune(p.Content, '*') {
+		return wildMatch(p.Content, sub, false)
+	}
 	return sub == p.Content
+}
+
+// CoversContent reports whether this pattern's content part covers one
+// content string (a path for write and edit, a URL for fetch), using
+// the same three forms: exact, prefix with a trailing :*, wildcard.
+// The prefix form is a plain string prefix here, so write(src/:*)
+// covers anything under src/. In wildcards, * stops at a path
+// separator and ** crosses them.
+func (p Pattern) CoversContent(content string) bool {
+	if p.Content == "" {
+		return true
+	}
+	if prefix, ok := strings.CutSuffix(p.Content, ":*"); ok {
+		return strings.HasPrefix(content, prefix)
+	}
+	if strings.ContainsRune(p.Content, '*') {
+		return wildMatch(p.Content, content, true)
+	}
+	return content == p.Content
+}
+
+// wildMatch matches s against a pattern with * wildcards, recursively
+// so a star can try every split point. In path mode * stops at / and
+// only ** crosses it; outside path mode * matches any run, because
+// shell subcommands are already split at the operators that matter.
+func wildMatch(pattern, s string, pathMode bool) bool {
+	for pattern != "" && pattern[0] != '*' {
+		if s == "" || pattern[0] != s[0] {
+			return false
+		}
+		pattern, s = pattern[1:], s[1:]
+	}
+	if pattern == "" {
+		return s == ""
+	}
+	deep := !pathMode
+	if pathMode && strings.HasPrefix(pattern, "**") {
+		deep = true
+	}
+	pattern = strings.TrimLeft(pattern, "*")
+	for i := 0; ; i++ {
+		if wildMatch(pattern, s[i:], pathMode) {
+			return true
+		}
+		if i == len(s) || (!deep && s[i] == '/') {
+			return false
+		}
+	}
 }
 
 // PrefixMatcher tests a permission pattern against one invocation. Only
@@ -169,4 +250,19 @@ type exactNameMatcher struct{}
 
 func (exactNameMatcher) Matches(p Pattern) bool {
 	return p.Content == ""
+}
+
+// contentMatcher matches a pattern against one content string: the
+// file path for write and edit, the URL for fetch. An empty value
+// matches only tool-wide rules, the conservative direction for an
+// invocation whose arguments did not parse.
+type contentMatcher struct {
+	value string
+}
+
+func (m contentMatcher) Matches(p Pattern) bool {
+	if p.Content != "" && m.value == "" {
+		return false
+	}
+	return p.CoversContent(m.value)
 }
