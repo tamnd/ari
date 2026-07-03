@@ -104,12 +104,17 @@ type Consequence struct {
 }
 
 // PermissionRequested asks a client to resolve a permission decision.
+// Mode is the session mode in effect, so the client's full-auto
+// indicator and the core can never disagree; Reason is the prose why,
+// naming the offending subcommand for a compound sh call.
 type PermissionRequested struct {
 	ID          string      `json:"id"`
 	Call        string      `json:"call"`
 	Tool        string      `json:"tool"`
 	Consequence Consequence `json:"consequence"`
 	Suggestions []string    `json:"suggestions,omitempty"`
+	Mode        string      `json:"mode,omitempty"`
+	Reason      string      `json:"reason,omitempty"`
 }
 
 // PermissionResolved records how a permission decision landed and why.

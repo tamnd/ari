@@ -1,0 +1,9 @@
+--- a/<root>/main.go
++++ b/<root>/main.go
+@@ -1,5 +1,5 @@
+ package main
+ 
+ func main() {
+-	println("hi")
++	println("hello")
+ }

