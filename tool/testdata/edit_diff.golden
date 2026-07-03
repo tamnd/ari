@@ -1,0 +1,9 @@
+--- a<root>/main.go
++++ b<root>/main.go
+@@ -15,5 +15,5 @@
+ 	fmt.Println("seven")
+ 	fmt.Println("eight")
+ 	fmt.Println("nine")
+-	fmt.Println("ten")
++	fmt.Fprintln(os.Stderr, "ten")
+ }
