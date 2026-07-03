@@ -155,7 +155,9 @@ func consume(ctx context.Context, sub *core.Subscription, s shot, turn string) e
 					return core.Wrap(core.ErrInternal, err, "decoding turn.finished")
 				}
 				if !s.JSON && text.Len() > 0 {
-					fmt.Fprintln(s.Out, strings.TrimRight(text.String(), "\n"))
+					if _, werr := fmt.Fprintln(s.Out, strings.TrimRight(text.String(), "\n")); werr != nil {
+						return werr
+					}
 				}
 				return outcome(fin, denied, lastErr)
 			}
