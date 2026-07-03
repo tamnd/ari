@@ -10,7 +10,9 @@ import (
 	"github.com/tamnd/ari/config"
 	"github.com/tamnd/ari/event"
 	"github.com/tamnd/ari/journal"
+	"github.com/tamnd/ari/kernel/ledger"
 	"github.com/tamnd/ari/nest"
+	"github.com/tamnd/ari/provider"
 	"github.com/tamnd/ari/session"
 	"github.com/tamnd/ari/session/jsonl"
 	"github.com/tamnd/ari/version"
@@ -20,13 +22,15 @@ import (
 // Every client (TUI, one-shot, json stream, serve) drives it through this
 // type (doc 01 section 4.1).
 type Colony struct {
-	nest    nest.Nest
-	config  *config.Config
-	bus     *bus.Bus
-	journal *journal.Journal
-	store   session.Store
-	runner  TurnRunner
-	flags   config.FlagOverrides
+	nest     nest.Nest
+	config   *config.Config
+	bus      *bus.Bus
+	journal  *journal.Journal
+	store    session.Store
+	runner   TurnRunner
+	flags    config.FlagOverrides
+	registry *provider.Registry
+	ledger   *ledger.Ledger
 
 	mu       sync.Mutex
 	started  bool
@@ -97,6 +101,12 @@ func WithConfig(cfg *config.Config) Option {
 	return func(c *Colony) { c.config = cfg }
 }
 
+// WithRegistry injects a prebuilt provider registry, skipping the config
+// build. Tests wire scripted providers through this (D23).
+func WithRegistry(r *provider.Registry) Option {
+	return func(c *Colony) { c.registry = r }
+}
+
 // notYetRunner is the honest default until the loop slice lands (D24).
 type notYetRunner struct{}
 
@@ -143,6 +153,18 @@ func Open(ctx context.Context, dir string, opts ...Option) (*Colony, error) {
 		return nil, Wrap(ErrNest, err, "opening the journal")
 	}
 	c.journal = j
+	if c.registry == nil {
+		reg, err := BuildRegistry(c.config)
+		if err != nil {
+			return nil, err
+		}
+		c.registry = reg
+	}
+	// ledger.turn goes through the journal like every other event, so the
+	// meter is sequenced, durable, and visible to every subscriber.
+	c.ledger = ledger.New(ledger.DefaultPrices(), ledger.WithSink(func(e event.Event) {
+		c.journal.Append(e)
+	}))
 	c.ctx, c.stop = context.WithCancel(context.Background())
 	return c, nil
 }
@@ -152,6 +174,12 @@ func (c *Colony) Config() *config.Config { return c.config }
 
 // Nest exposes the resolved paths read-only.
 func (c *Colony) Nest() nest.Nest { return c.nest }
+
+// Registry exposes tier resolution; the loop asks it for a chain.
+func (c *Colony) Registry() *provider.Registry { return c.registry }
+
+// Ledger exposes the meter for roll-ups and for the loop to record turns.
+func (c *Colony) Ledger() *ledger.Ledger { return c.ledger }
 
 // Start brings the background goroutines up: the journal writer and the
 // bus fan-out. Separate from Open so a client subscribes before any event
@@ -274,9 +302,7 @@ func (c *Colony) startTurn(id TurnID, req SubmitRequest) {
 	c.sessions[req.Session].cancel = cancel
 	c.mu.Unlock()
 
-	c.turns.Add(1)
-	go func() {
-		defer c.turns.Done()
+	c.turns.Go(func() {
 		defer cancel()
 		h := &TurnHandle{Session: req.Session, Turn: id, Request: req, Store: c.store, colony: c}
 		_ = h.Emit(event.TypeTurnStarted, event.TurnStarted{ID: string(id), Ant: workerAnt, Prompt: req.Text})
@@ -293,7 +319,7 @@ func (c *Colony) startTurn(id TurnID, req SubmitRequest) {
 		}
 		_ = h.Emit(event.TypeTurnFinished, fin)
 		c.finishTurn(req.Session)
-	}()
+	})
 }
 
 // workerAnt names the ant on turn.started; the router owns this from the
@@ -380,9 +406,7 @@ func (c *Colony) Events(ctx context.Context, filter EventFilter) (*Subscription,
 		return nil, Wrap(ErrInternal, err, "encoding hello")
 	}
 
-	c.pumps.Add(1)
-	go func() {
-		defer c.pumps.Done()
+	c.pumps.Go(func() {
 		defer inner.Cancel()
 		send := func(e event.Event) bool {
 			select {
@@ -414,6 +438,6 @@ func (c *Colony) Events(ctx context.Context, filter EventFilter) (*Subscription,
 				return
 			}
 		}
-	}()
+	})
 	return s, nil
 }
