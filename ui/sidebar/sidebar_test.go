@@ -33,7 +33,7 @@ func frame(st State, w, h int) string {
 	s.SetState(st)
 	buf := uv.NewScreenBuffer(w, h)
 	s.Draw(buf, uv.Rect(0, 0, w, h))
-	return buf.Buffer.String()
+	return buf.String()
 }
 
 // TestDrawGolden pins the full panel tall, the squeezed panel short,

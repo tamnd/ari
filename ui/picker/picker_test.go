@@ -117,7 +117,7 @@ func TestDialogContract(t *testing.T) {
 	var d dialog.Dialog = New("session", "switch session", sessions, theme.Dark())
 	buf := uv.NewScreenBuffer(70, 16)
 	d.Draw(buf, buf.Bounds())
-	out := buf.Buffer.String()
+	out := buf.String()
 	for _, want := range []string{"switch session", "▸ fix the flaky bus test", "2h ago"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("picker frame missing %q:\n%s", want, out)
@@ -131,7 +131,7 @@ func TestDrawGolden(t *testing.T) {
 	shot := func(name string, d *Dialog) {
 		buf := uv.NewScreenBuffer(64, 14)
 		d.Draw(buf, buf.Bounds())
-		b.WriteString("== " + name + " ==\n" + buf.Buffer.String())
+		b.WriteString("== " + name + " ==\n" + buf.String())
 	}
 	fresh := New("session", "switch session", sessions, theme.Dark())
 	shot("fresh", fresh)

@@ -167,7 +167,7 @@ func TestDialogsSatisfyContract(t *testing.T) {
 
 	buf := uv.NewScreenBuffer(60, 12)
 	NewPick("p", "title", "detail", []string{"a", "b"}, th).Draw(buf, buf.Bounds())
-	out := buf.Buffer.String()
+	out := buf.String()
 	for _, want := range []string{"title", "detail", "▸ a"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("pick frame missing %q:\n%s", want, out)
@@ -183,7 +183,7 @@ func TestOnboardingGolden(t *testing.T) {
 	shot := func(name string, d dialog.Dialog) {
 		buf := uv.NewScreenBuffer(64, 12)
 		d.Draw(buf, buf.Bounds())
-		b.WriteString("== " + name + " ==\n" + buf.Buffer.String())
+		b.WriteString("== " + name + " ==\n" + buf.String())
 	}
 	p := f.Start()
 	shot("provider", p)
