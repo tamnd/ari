@@ -137,10 +137,14 @@ func (j *Journal) run() {
 		}
 	}
 	if j.w != nil {
-		j.w.Flush()
+		if err := j.w.Flush(); err != nil {
+			fmt.Fprintf(os.Stderr, "ari: journal flush: %v\n", err)
+		}
 	}
 	if j.file != nil {
-		j.file.Close()
+		if err := j.file.Close(); err != nil {
+			fmt.Fprintf(os.Stderr, "ari: journal close: %v\n", err)
+		}
 	}
 }
 
@@ -165,8 +169,12 @@ func (j *Journal) write(e event.Event) error {
 }
 
 func (j *Journal) roll() error {
-	j.w.Flush()
-	j.file.Close()
+	if err := j.w.Flush(); err != nil {
+		return err
+	}
+	if err := j.file.Close(); err != nil {
+		return err
+	}
 	j.index++
 	j.size = 0
 	return j.openFile()
@@ -183,7 +191,7 @@ func (j *Journal) openFile() error {
 	}
 	st, err := f.Stat()
 	if err != nil {
-		f.Close()
+		_ = f.Close()
 		return err
 	}
 	j.file, j.w, j.size = f, bufio.NewWriter(f), st.Size()
@@ -237,7 +245,9 @@ func fileName(index int) string {
 
 func indexOf(name string) int {
 	var i int
-	fmt.Sscanf(name, "events-%05d.jsonl", &i)
+	if _, err := fmt.Sscanf(name, "events-%05d.jsonl", &i); err != nil {
+		return 0
+	}
 	return i
 }
 
@@ -257,7 +267,7 @@ func readFile(path string, after uint64) ([]event.Event, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	var out []event.Event
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)

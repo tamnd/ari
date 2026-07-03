@@ -99,14 +99,18 @@ func (st *Store) Create(ctx context.Context, parent session.ID, meta session.Ses
 	if err != nil {
 		return "", err
 	}
-	defer f.Close()
 	w := bufio.NewWriter(f)
 	for _, e := range lines {
 		if err := writeLine(w, e); err != nil {
+			_ = f.Close()
 			return "", err
 		}
 	}
 	if err := w.Flush(); err != nil {
+		_ = f.Close()
+		return "", err
+	}
+	if err := f.Close(); err != nil {
 		return "", err
 	}
 	return id, nil
@@ -145,7 +149,7 @@ func (st *Store) appendTo(path string, e session.Entry, mkdir bool) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	w := bufio.NewWriter(f)
 	if err := writeLine(w, e); err != nil {
 		return err
@@ -175,7 +179,7 @@ func (st *Store) Load(ctx context.Context, s session.ID) (session.Transcript, er
 	if err != nil {
 		return session.Transcript{}, fmt.Errorf("session %s: %w", s, err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	var t session.Transcript
 	var order []session.Entry
@@ -286,7 +290,7 @@ func (st *Store) summarize(id session.ID) (session.Summary, error) {
 	if err != nil {
 		return session.Summary{}, err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	sum := session.Summary{ID: id}
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
