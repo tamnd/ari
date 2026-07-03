@@ -7,6 +7,7 @@ package tool
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"time"
 )
 
@@ -135,6 +136,21 @@ type Pattern struct {
 	Tool    string // the tool name part, "sh" in sh(git:*)
 	Content string // the argument part, "git:*" in sh(git:*); empty is tool-wide
 	Source  string // the pattern verbatim, journaled as written
+}
+
+// CoversSubcommand reports whether this pattern's content part covers
+// one normalized subcommand. Empty content is tool-wide and covers
+// everything; "git commit:*" covers "git commit" and anything after it
+// at a word boundary, so "git commit -m x" matches and "git commitx"
+// does not; content without the :* wildcard must match exactly.
+func (p Pattern) CoversSubcommand(sub string) bool {
+	if p.Content == "" {
+		return true
+	}
+	if prefix, ok := strings.CutSuffix(p.Content, ":*"); ok {
+		return sub == prefix || strings.HasPrefix(sub, prefix+" ")
+	}
+	return sub == p.Content
 }
 
 // PrefixMatcher tests a permission pattern against one invocation. Only
