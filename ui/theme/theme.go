@@ -12,6 +12,7 @@ import (
 	"charm.land/glamour/v2/ansi"
 	"charm.land/glamour/v2/styles"
 	"charm.land/lipgloss/v2"
+	"github.com/alecthomas/chroma/v2"
 )
 
 // Palette is the semantic color set a theme author fills in. Everything
@@ -77,6 +78,7 @@ type Styles struct {
 	// section 10.4).
 	Diff     DiffStyle
 	Markdown ansi.StyleConfig // glamour
+	Chroma   *chroma.Style    // syntax highlighting
 }
 
 // Theme bundles a palette, its expanded styles, and the per-ant accent
@@ -132,6 +134,7 @@ func Expand(p Palette) Styles {
 		},
 
 		Markdown: markdownConfig(p),
+		Chroma:   chromaStyle(p),
 	}
 	return s
 }
