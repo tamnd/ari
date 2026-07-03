@@ -81,6 +81,13 @@ func (t *TurnHandle) Emit(typ event.Type, payload any) error {
 	return t.colony.emit(typ, string(t.Session), string(t.Turn), payload)
 }
 
+// AppendRaw sequences one pre-stamped event through the journal. The
+// permission pipeline and the tools use it via the ant's adapter: their
+// events already carry session and turn ids.
+func (t *TurnHandle) AppendRaw(e event.Event) event.Event {
+	return t.colony.journal.Append(e)
+}
+
 // Option configures Open.
 type Option func(*Colony)
 

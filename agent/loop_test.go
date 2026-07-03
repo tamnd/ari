@@ -476,3 +476,82 @@ func TestTransitionsInIsolation(t *testing.T) {
 		}
 	})
 }
+
+// TestConversationPersistsAcrossRuns proves the ant owns one context
+// window for the session: a second Run on the same Loop sees the first
+// exchange in its request, and per-run recovery counters reset.
+func TestConversationPersistsAcrossRuns(t *testing.T) {
+	p := scripted.New(
+		scripted.Response{Text: "first answer", Usage: provider.Usage{Input: 5, Output: 2}},
+		scripted.Response{Text: "second answer", Usage: provider.Usage{Input: 9, Output: 2}},
+	)
+	rec := &recordingProvider{inner: p}
+	h := newHarness(rec, registry(t))
+
+	if out := run(t, h, "first question"); out.Reason != TermCompleted {
+		t.Fatalf("run 1 reason = %s", out.Reason)
+	}
+	if out := run(t, h, "second question"); out.Reason != TermCompleted {
+		t.Fatalf("run 2 reason = %s", out.Reason)
+	}
+
+	second := rec.requests[1].Messages
+	var texts []string
+	for _, m := range second {
+		for _, b := range m.Blocks {
+			texts = append(texts, b.Text)
+		}
+	}
+	want := []string{"first question", "first answer", "second question"}
+	if len(texts) != len(want) {
+		t.Fatalf("second request carries %v, want %v", texts, want)
+	}
+	for i := range want {
+		if texts[i] != want[i] {
+			t.Fatalf("second request carries %v, want %v", texts, want)
+		}
+	}
+}
+
+// TestPrefixPrependedAndStable pins the block-two contract (D14): the
+// prefix rides before the tail on every request, byte-identical across
+// turns and across runs, and only the tail varies.
+func TestPrefixPrependedAndStable(t *testing.T) {
+	p := scripted.New(
+		scripted.Response{
+			Text:  "looking",
+			Calls: []provider.ToolCall{call("c1", "reader", `{}`)},
+			Usage: provider.Usage{Input: 5, Output: 2},
+		},
+		scripted.Response{Text: "done", Usage: provider.Usage{Input: 9, Output: 2}},
+		scripted.Response{Text: "again", Usage: provider.Usage{Input: 9, Output: 2}},
+	)
+	rec := &recordingProvider{inner: p}
+	h := newHarness(rec, registry(t, &fakeTool{name: "reader", safe: true}))
+	h.loop.Prefix = []provider.Message{{
+		Role: "user",
+		Blocks: []provider.MsgBlock{
+			{Kind: "text", Text: "<system-reminder>the pinned index</system-reminder>", Cache: true},
+		},
+	}}
+
+	run(t, h, "task one")
+	run(t, h, "task two")
+
+	if len(rec.requests) != 3 {
+		t.Fatalf("requests = %d, want 3", len(rec.requests))
+	}
+	first, _ := json.Marshal(rec.requests[0].Messages[0])
+	for i, req := range rec.requests {
+		got, _ := json.Marshal(req.Messages[0])
+		if string(got) != string(first) {
+			t.Fatalf("request %d prefix drifted:\n%s\nwant\n%s", i, got, first)
+		}
+		if !req.Messages[0].Blocks[0].Cache {
+			t.Fatalf("request %d lost the block-two breakpoint", i)
+		}
+		if req.Messages[1].Blocks[0].Text != "task one" {
+			t.Fatalf("request %d tail does not start at the task", i)
+		}
+	}
+}

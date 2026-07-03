@@ -1,0 +1,47 @@
+{
+  "name": "worker-read-edit-verify",
+  "prompt": "In hello.txt, replace the old marker with the new marker, then verify the change.",
+  "responses": [
+    {
+      "text": "Reading the file before touching it.",
+      "calls": [
+        {
+          "ID": "call-read",
+          "Name": "read",
+          "Input": "{\"file_path\":\"%ROOT%/hello.txt\"}"
+        }
+      ],
+      "usage": { "Input": 40, "Output": 12 },
+      "stop": "tool_use"
+    },
+    {
+      "text": "Applying the replacement.",
+      "calls": [
+        {
+          "ID": "call-edit",
+          "Name": "edit",
+          "Input": "{\"file_path\":\"%ROOT%/hello.txt\",\"old_string\":\"the old marker\",\"new_string\":\"the new marker\"}"
+        }
+      ],
+      "usage": { "Input": 55, "Output": 18 },
+      "stop": "tool_use"
+    },
+    {
+      "text": "Verifying the edit landed.",
+      "calls": [
+        {
+          "ID": "call-verify",
+          "Name": "sh",
+          "Input": "{\"command\":\"grep -c 'the new marker' hello.txt\",\"description\":\"Count the new marker\"}"
+        }
+      ],
+      "usage": { "Input": 70, "Output": 15 },
+      "stop": "tool_use"
+    },
+    {
+      "text": "hello.txt now carries the new marker; grep confirms exactly one match.",
+      "usage": { "Input": 82, "Output": 20 },
+      "stop": "end_turn"
+    }
+  ]
+}

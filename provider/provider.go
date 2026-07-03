@@ -90,6 +90,7 @@ type MsgBlock struct {
 	Call   *ToolCall // for tool_call
 	CallID string    // for tool_result: which call this answers
 	IsErr  bool      // for tool_result: the tool failed
+	Cache  bool      // breakpoint after this block (D14); OpenAI ignores it
 }
 
 // ToolCall is one tool invocation the model asked for.

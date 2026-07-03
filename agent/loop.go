@@ -36,9 +36,17 @@ type Loop struct {
 	Model    string // resolved model id
 	Fallback string // fallback model id, "" means none
 	System   []provider.Block
-	Tools    *tool.Registry
-	TC       *tool.ToolContext
-	Decide   DecideFunc
+
+	// Prefix is block two of the cache-aligned prompt (D14): the pinned
+	// index and project memory as one synthetic system-reminder user
+	// message, prepended before the task tail on every request. The ant
+	// builds it once per session so it stays byte-stable across turns;
+	// its last block carries the second cache breakpoint.
+	Prefix []provider.Message
+
+	Tools  *tool.Registry
+	TC     *tool.ToolContext
+	Decide DecideFunc
 
 	// Emit publishes one event on the stream; the colony's TurnHandle
 	// satisfies it. Nil drops events, for isolated transition tests.
@@ -179,24 +187,33 @@ func (l *Loop) Submit(text string) {
 // never recurses and never returns without a TermReason (D6). A non-nil
 // error is a genuine bug, never a turn that ended badly; every model
 // and tool failure is a reason, not an error (doc 03 section 13).
+//
+// The conversation survives Run: a second Run on the same Loop appends
+// its prompt to the transcript the first one built, because the ant owns
+// one context window for the whole session (doc 01 section 2.2). Per-run
+// counters and recovery guards reset; msgs, the boundary, the part
+// counter, and the compaction count carry over.
 func (l *Loop) Run(ctx context.Context, prompt string) (Outcome, error) {
-	st := &State{
-		next:   transStart,
-		model:  l.Model,
-		maxOut: l.Limits.MaxOut,
-		msgs: []provider.Message{{
-			Role:   "user",
-			Blocks: []provider.MsgBlock{{Kind: "text", Text: prompt}},
-		}},
-	}
 	l.mu.Lock()
-	l.st = st
+	st := l.st
+	if st == nil {
+		st = &State{}
+		l.st = st
+	}
+	st.next = transStart
+	st.model = l.Model
+	st.maxOut = l.Limits.MaxOut
+	st.term = ""
+	st.stopReason = ""
+	st.toolCalls = nil
+	st.pendingErr = nil
+	st.modelRetries, st.outputRetries = 0, 0
+	st.fellBack, st.reactiveCompacted, st.compactedThisTurn = false, false, false
+	st.msgs = append(st.msgs, provider.Message{
+		Role:   "user",
+		Blocks: []provider.MsgBlock{{Kind: "text", Text: prompt}},
+	})
 	l.mu.Unlock()
-	defer func() {
-		l.mu.Lock()
-		l.st = nil
-		l.mu.Unlock()
-	}()
 
 	for {
 		// Cooperative cancellation, checked once per iteration before
@@ -295,16 +312,20 @@ func (l *Loop) drainQueue(st *State) {
 	st.next = transAssemble
 }
 
-// buildRequest renders the request. The three-block cache alignment
-// (D14) is the ant's job in slice 9; the loop's contract is narrower
-// and holds already: system and tools render identically every turn,
-// and only the message tail varies.
+// buildRequest renders the three-block cache-aligned prompt (D14):
+// system and tools are block one and render identically every turn, the
+// prefix is block two and changes only at folding boundaries, and the
+// task tail is the only per-turn variance.
 func (l *Loop) buildRequest(st *State) provider.Request {
+	tail := st.msgs[st.boundaryIdx:]
+	msgs := make([]provider.Message, 0, len(l.Prefix)+len(tail))
+	msgs = append(msgs, l.Prefix...)
+	msgs = append(msgs, tail...)
 	return provider.Request{
 		Model:    st.model,
 		System:   l.System,
 		Tools:    l.toolDefs(),
-		Messages: st.msgs[st.boundaryIdx:],
+		Messages: msgs,
 		MaxOut:   st.maxOut,
 		Meta: provider.RequestMeta{
 			Ant:     "worker",
@@ -343,6 +364,11 @@ func (l *Loop) liveTokens(st *State) int {
 	n := 0
 	for _, b := range l.System {
 		n += estimateTokens(b.Text)
+	}
+	for _, m := range l.Prefix {
+		for _, b := range m.Blocks {
+			n += estimateTokens(b.Text)
+		}
 	}
 	for _, m := range st.msgs[st.boundaryIdx:] {
 		for _, b := range m.Blocks {
