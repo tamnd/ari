@@ -35,7 +35,7 @@ jobs:
           go-version-file: go.mod
           check-latest: true
           cache: true
-      - uses: goreleaser/goreleaser-action@v7.2.2
+      - uses: goreleaser/goreleaser-action@v7.2.3
         with:
           distribution: goreleaser
           version: "~> v2"
@@ -80,7 +80,7 @@ jobs:
           cosign-release: "v2.6.3"
       - uses: anchore/sbom-action/download-syft@v0.24.0
 
-      - uses: goreleaser/goreleaser-action@v7.2.2
+      - uses: goreleaser/goreleaser-action@v7.2.3
         with:
           distribution: goreleaser
           version: "~> v2"
