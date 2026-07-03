@@ -175,15 +175,18 @@ func (r *Runner) wake(ctx context.Context, t *core.TurnHandle) (*worker, error) 
 	if resolved, rerr := filepath.EvalSymlinks(self); rerr == nil && resolved != "" {
 		self = resolved
 	}
+	// The floor compares symlink-resolved mutation targets, so the
+	// protected paths resolve the same way; otherwise a root behind a
+	// symlink (macOS /var -> /private/var) hides the nest from it.
 	pipe := &permission.Pipeline{
 		Mode: permission.Mode(r.config.mode),
 		Paths: permission.Paths{
-			Root:         r.nest.Root,
-			Nest:         r.nest.ProjectDir(),
-			GlobalNest:   r.nest.Global,
-			Home:         home,
+			Root:         tool.ResolveMutationPath(r.nest.Root),
+			Nest:         tool.ResolveMutationPath(r.nest.ProjectDir()),
+			GlobalNest:   tool.ResolveMutationPath(r.nest.Global),
+			Home:         tool.ResolveMutationPath(home),
 			AriBinary:    self,
-			GlobalConfig: r.nest.GlobalConfig(),
+			GlobalConfig: tool.ResolveMutationPath(r.nest.GlobalConfig()),
 		},
 	}
 
