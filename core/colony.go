@@ -73,6 +73,11 @@ type TurnHandle struct {
 	Request SubmitRequest
 	Store   session.Store
 
+	// Reason is where the runner reports the loop's terminal reason
+	// (agent.TermReason's vocabulary). Empty keeps the colony's default
+	// "done"; cancellation and errors override either way.
+	Reason string
+
 	colony *Colony
 }
 
@@ -317,6 +322,9 @@ func (c *Colony) startTurn(id TurnID, req SubmitRequest) {
 		_ = h.Emit(event.TypeTurnStarted, event.TurnStarted{ID: string(id), Ant: workerAnt, Prompt: req.Text})
 		err := c.runner.RunTurn(ctx, h)
 		fin := event.TurnFinished{ID: string(id), Reason: "done"}
+		if h.Reason != "" {
+			fin.Reason = h.Reason
+		}
 		switch {
 		case ctx.Err() != nil:
 			fin.Reason = "canceled"

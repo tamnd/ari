@@ -182,8 +182,8 @@ func TestWorkerReadEditVerify(t *testing.T) {
 	if err := json.Unmarshal(last.Payload, &fin); err != nil {
 		t.Fatal(err)
 	}
-	if fin.Reason != "done" {
-		t.Errorf("turn.finished reason = %q, want done", fin.Reason)
+	if fin.Reason != "completed" {
+		t.Errorf("turn.finished reason = %q, want completed", fin.Reason)
 	}
 }
 
