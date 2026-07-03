@@ -1,0 +1,28 @@
+== fresh ==
+
+
+    ╭──────────────────────────────────────────────────────╮
+    │ switch session                                       │
+    │ › _                                                  │
+    │                                                      │
+    │ ▸ fix the flaky bus test  2h ago                     │
+    │   wire the sidebar  1d ago                           │
+    │   release checklist  3d ago                          │
+    │   explain the diff cache  5d ago                     │
+    ╰──────────────────────────────────────────────────────╯
+
+
+== filtered ==
+
+
+
+    ╭──────────────────────────────────────────────────────╮
+    │ switch session                                       │
+    │ › the_                                               │
+    │                                                      │
+    │ ▸ fix the flaky bus test  2h ago                     │
+    │   wire the sidebar  1d ago                           │
+    │   explain the diff cache  5d ago                     │
+    ╰──────────────────────────────────────────────────────╯
+
+

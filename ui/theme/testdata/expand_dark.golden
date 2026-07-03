@@ -1,0 +1,21 @@
+base: ^[[38;2;229;231;235mbase text^[[m
+muted: ^[[38;2;179;185;196mmuted text^[[m
+subtle: ^[[38;2;139;147;161msubtle text^[[m
+faint: ^[[38;2;91;98;112mfaint text^[[m
+user_prompt: ^[[1;38;2;229;231;235muser prompt^[[m
+reasoning: ^[[3;38;2;91;98;112mreasoning^[[m
+tool_name: ^[[1;38;2;240;171;252mtool name^[[m
+tool_input: ^[[38;2;179;185;196mtool input^[[m
+tool_output: ^[[38;2;139;147;161mtool output^[[m
+tool_err: ^[[38;2;248;113;113mtool error^[[m
+success: ^[[38;2;74;222;128msuccess^[[m
+warning: ^[[38;2;250;204;21mwarning^[[m
+error: ^[[38;2;248;113;113merror^[[m
+info: ^[[38;2;96;165;250minfo^[[m
+title: ^[[1;38;2;192;132;252mtitle^[[m
+border: ^[[38;2;91;98;112mborder^[[m
+selected: ^[[38;2;229;231;235;48;2;51;56;74mselected^[[m
+diff_add: ^[[38;2;229;231;235;48;2;18;38;26m+ added line^[[m
+diff_del: ^[[38;2;229;231;235;48;2;45;18;21m- deleted line^[[m
+diff_header: ^[[1;38;2;179;185;196m@@ -1 +1 @@^[[m
+diff_context: ^[[38;2;139;147;161m  context^[[m

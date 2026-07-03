@@ -1,0 +1,21 @@
+hello                    -> bus.HelloMsg               must-deliver
+session.created          -> bus.SessionCreatedMsg      must-deliver
+session.updated          -> bus.SessionUpdatedMsg      must-deliver
+session.forked           -> bus.SessionForkedMsg       must-deliver
+turn.started             -> bus.TurnStartedMsg         must-deliver
+part.text.delta          -> bus.TextDeltaMsg           lossy
+part.text.end            -> bus.TextEndMsg             must-deliver
+part.thinking.delta      -> bus.ThinkingDeltaMsg       lossy
+part.thinking.end        -> bus.ThinkingEndMsg         must-deliver
+part.tool.start          -> bus.ToolStartMsg           must-deliver
+part.tool.progress       -> bus.ToolProgressMsg        lossy
+part.tool.end            -> bus.ToolEndMsg             must-deliver
+permission.requested     -> bus.PermissionRequestedMsg must-deliver
+permission.resolved      -> bus.PermissionResolvedMsg  must-deliver
+ledger.turn              -> bus.LedgerTurnMsg          lossy
+log                      -> bus.LogMsg                 lossy
+error                    -> bus.ErrorMsg               must-deliver
+turn.finished            -> bus.TurnFinishedMsg        must-deliver
+ant.spawned              -> (skipped)
+route.decided            -> (skipped)
+memory.folded            -> (skipped)

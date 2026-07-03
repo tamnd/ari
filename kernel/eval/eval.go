@@ -65,7 +65,14 @@ func Golden(t TB, name, got string) {
 //
 //	func TestMain(m *testing.M) { eval.Main(m) }
 func Main(m *testing.M) {
-	goleak.VerifyTestMain(m)
+	goleak.VerifyTestMain(m, ignoreKnown...)
+}
+
+// ignoreKnown lists the third-party background goroutines that are
+// process-global by design and not a leak: regexp2's match clock, which
+// chroma (under glamour) starts once and parks forever.
+var ignoreKnown = []goleak.Option{
+	goleak.IgnoreAnyFunction("github.com/dlclark/regexp2.runClock"),
 }
 
 // NoLeaks asserts no unexpected goroutine is alive right now. Tests that
@@ -73,7 +80,7 @@ func Main(m *testing.M) {
 // call site rather than at package exit.
 func NoLeaks(t TB) {
 	t.Helper()
-	if err := goleak.Find(); err != nil {
+	if err := goleak.Find(ignoreKnown...); err != nil {
 		t.Errorf("leaked goroutines: %v", err)
 	}
 }

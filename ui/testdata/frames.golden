@@ -1,0 +1,91 @@
+== landing wide ==
+                                                                                                              ari アリ
+
+                                                                                                              /home/tam/ari
+
+                                                                                                              claude-sonnet-5
+                                                                                                              anthropic
+                                                                                                              context   0%  $0.00
+
+                                                                                                              ◆ one ant, awake
+
+                                         ·    ████              ██ ·
+                                                  ██  ██  ████    ·
+                                           ·  ██████  ████      ██ ·
+                                            ██    ██  ██        ██
+                                              ██████  ██        ██
+                                            ·  · ·                  ·
+
+                                            type a prompt to start
+
+
+
+
+
+
+
+
+
+
+> ask ari anything                                                                                                    
+>  
+>  
+enter send  shift+enter newline  ctrl+e open $EDITOR  ctrl+w switch focus  ctrl+g help  ctrl+c quit
+== chat wide ==
+                                                                                                              ari アリ
+
+                                                                                                              /home/tam/ari
+
+                                                                                                              claude-sonnet-5
+                                                                                                              anthropic
+                                                                                                              context   0%  $0.00
+
+                                                                                                              ◆ one ant, idle
+
+
+
+
+
+
+
+
+
+
+
+
+
+say hi
+
+hello from the ant
+
+end_turn · 0 in / 0 out
+
+> ask ari anything                                                                                                    
+>  
+>  
+enter send  shift+enter newline  ctrl+e open $EDITOR  ctrl+w switch focus  ctrl+g help  ctrl+c quit
+== chat compact ==
+ari アリ
+
+
+
+
+
+
+
+
+
+
+
+
+
+say hi
+
+hello from the ant
+
+end_turn · 0 in / 0 out
+
+> ask ari anything                                        
+>  
+>  
+enter send  shift+enter newline  ctrl+e open $EDITOR  ctrl+w switch focus  ctrl…

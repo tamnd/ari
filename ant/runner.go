@@ -44,6 +44,7 @@ type Runner struct {
 	ledger   *ledger.Ledger
 	config   *coreConfig
 	nest     nest.Nest
+	asks     Asker
 	bound    bool
 
 	mu      sync.Mutex
@@ -54,6 +55,13 @@ type Runner struct {
 // documents the dependency instead of hiding it behind the whole struct.
 type coreConfig struct {
 	mode string
+}
+
+// Asker is how a blocked Ask reaches the client and the answer comes
+// back. The colony's Asks registry implements it; a headless run leaves
+// it nil and the Ask stands as a refusal (doc 05 section 3).
+type Asker interface {
+	Wait(ctx context.Context, s core.SessionID, request string) (core.RespondRequest, error)
 }
 
 // NewRunner builds an unbound runner. Pass it to core.Open via
@@ -79,7 +87,17 @@ func (r *Runner) Bind(c *core.Colony) {
 	r.ledger = c.Ledger()
 	r.config = &coreConfig{mode: c.Config().Mode}
 	r.nest = c.Nest()
+	r.asks = c.Asks()
 	r.bound = true
+}
+
+// Headless drops the interactive resolver, so every Ask that reaches
+// the pipeline stands and the loop refuses the call instead of blocking
+// on a prompt nobody can see (doc 05 section 3).
+func (r *Runner) Headless() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.asks = nil
 }
 
 // RunTurn implements core.TurnRunner: it wakes or finds the session's
@@ -171,7 +189,9 @@ func (r *Runner) wake(ctx context.Context, t *core.TurnHandle) (*worker, error) 
 		pipe:        pipe,
 		session:     string(t.Session),
 		defaultMode: permission.Mode(r.config.mode),
+		asks:        r.asks,
 	}
+	pipe.Resolver = permission.ResolverFunc(w.resolve)
 	w.loop = &agent.Loop{
 		Provider: primary.Provider,
 		Model:    primary.Model,
@@ -244,7 +264,35 @@ type worker struct {
 	pipe        *permission.Pipeline
 	session     string
 	defaultMode permission.Mode
+	asks        Asker
 	turnID      string
+}
+
+// resolve blocks the pipeline's Ask on the client's answer. With no
+// asker, or when the turn is cancelled under the prompt, it abstains
+// and the standing Ask becomes the refusal decide maps to a verdict.
+func (w *worker) resolve(ctx context.Context, req *permission.Request) (permission.Resolution, bool) {
+	if w.asks == nil {
+		return permission.Resolution{}, false
+	}
+	ans, err := w.asks.Wait(ctx, core.SessionID(w.session), req.ID)
+	if err != nil {
+		return permission.Resolution{}, false
+	}
+	switch ans.Decision {
+	case core.Allow:
+		return permission.Resolution{Behavior: permission.Allow}, true
+	case core.AllowSession:
+		// The suggestions the pipeline built are exactly the rules the
+		// dialog showed, so "allow for session" persists those and only
+		// those, in memory, for this session's pipeline alone.
+		if rules, perr := permission.ParseAll(req.Suggestions, permission.LayerSession); perr == nil {
+			w.pipe.AddAllow(rules...)
+		}
+		return permission.Resolution{Behavior: permission.Allow}, true
+	default:
+		return permission.Resolution{Behavior: permission.Deny, Message: "the user denied this call"}, true
+	}
 }
 
 // rawJournal adapts the turn handle's pre-stamped append to the
@@ -276,9 +324,10 @@ func (w *worker) runTurn(ctx context.Context, t *core.TurnHandle) error {
 	return err
 }
 
-// decide adapts the doc 05 pipeline to the loop's Verdict seam. A
-// standing Ask is a refusal in M0, because no resolver is attached
-// until the dialog slice; the message teaches the model why.
+// decide adapts the doc 05 pipeline to the loop's Verdict seam. An Ask
+// that still stands here means the resolver abstained: there is no
+// interactive client, or the turn was cancelled under the prompt. That
+// is a refusal, and the message teaches the model why.
 func (w *worker) decide(ctx context.Context, tl tool.Tool, input json.RawMessage, callID string) agent.Verdict {
 	d := w.pipe.Decide(ctx, permission.Call{
 		Tool:    tl,

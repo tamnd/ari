@@ -31,6 +31,7 @@ type Colony struct {
 	flags    config.FlagOverrides
 	registry *provider.Registry
 	ledger   *ledger.Ledger
+	asks     *Asks
 
 	mu       sync.Mutex
 	started  bool
@@ -137,6 +138,7 @@ func Open(ctx context.Context, dir string, opts ...Option) (*Colony, error) {
 		bus:      bus.New(),
 		runner:   notYetRunner{},
 		sessions: make(map[SessionID]*sessionState),
+		asks:     newAsks(),
 	}
 	for _, opt := range opts {
 		if opt != nil {
@@ -367,12 +369,19 @@ func (c *Colony) Cancel(ctx context.Context, s SessionID) error {
 	return nil
 }
 
-// Respond answers an outstanding permission request. The pipeline lands in
-// a later slice; until then no request can be outstanding, and the answer
-// is the honest one.
+// Respond answers an outstanding permission request. The waiter is the
+// pipeline resolver blocked inside the session's running turn.
 func (c *Colony) Respond(ctx context.Context, req RespondRequest) error {
-	return Errf(ErrPermission, "no outstanding request %s on session %s", req.RequestID, req.Session)
+	switch req.Decision {
+	case Allow, AllowSession, Deny:
+	default:
+		return Errf(ErrPermission, "unknown decision %q for request %s", req.Decision, req.RequestID)
+	}
+	return c.asks.deliver(req)
 }
+
+// Asks exposes the registry so the runner's resolver can wait on it.
+func (c *Colony) Asks() *Asks { return c.asks }
 
 // Subscription is one client's view of the event stream. Read C, watch
 // Done, call Cancel when finished. C is never closed; Done signals the end

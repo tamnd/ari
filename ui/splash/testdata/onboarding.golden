@@ -1,0 +1,48 @@
+== provider ==
+
+
+       ╭───────────────────────────────────────────────╮
+       │ welcome to ari                                │
+       │ pick the provider this colony will think with │
+       │                                               │
+       │ ▸ anthropic                                   │
+       │   openai                                      │
+       │   openrouter                                  │
+       ╰───────────────────────────────────────────────╯
+
+== credential ==
+
+╭──────────────────────────────────────────────────────────────╮
+│ credentials                                                  │
+│                                                              │
+│ ari reads ANTHROPIC_API_KEY from your environment or the OS ke
+│ The value never touches a file ari writes or a model context.
+│ Set ANTHROPIC_API_KEY before your first prompt.              │
+│                                                              │
+│ ▸ continue                                                   │
+╰──────────────────────────────────────────────────────────────╯
+
+== tier ==
+
+
+    ╭─────────────────────────────────────────────────────╮
+    │ model tier                                          │
+    │ queen plans, workers execute; pick the default tier │
+    │                                                     │
+    │ ▸ best                                              │
+    │   balanced                                          │
+    │   fast                                              │
+    ╰─────────────────────────────────────────────────────╯
+
+== init ==
+
+
+╭──────────────────────────────────────────────────────────────╮
+│ project memory                                               │
+│ survey this repo and write ARI.md so the colony starts oriente
+│                                                              │
+│ ▸ initialize now                                             │
+│   skip for now                                               │
+╰──────────────────────────────────────────────────────────────╯
+
+
