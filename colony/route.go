@@ -28,6 +28,10 @@ type RouteConfig struct {
 
 	CoordinationOverhead int64   // per-subtask handoff tax the fan-out gate adds to its projection
 	SpecialistEdge       float64 // margin above the neutral prior a specialist's fitness must clear
+
+	SpawnMatchThreshold float64 // best match below this (and no exploration) births a new ant
+	SeedK               int     // memory rows the seed cluster query reads
+	SeedPins            int     // top memories that become the newborn's pinned index
 }
 
 // DefaultRouteConfig is the shipping default: match-leaning fusion, a small
@@ -41,6 +45,9 @@ func DefaultRouteConfig() RouteConfig {
 		SignalBonusCap:       0.1,
 		CoordinationOverhead: 2000,
 		SpecialistEdge:       0.15,
+		SpawnMatchThreshold:  0.25,
+		SeedK:                32,
+		SeedPins:             8,
 	}
 }
 
@@ -114,6 +121,15 @@ func (q *Queen) Assign(ctx context.Context, brief TaskBrief) (Assignment, error)
 		return Assignment{}, fmt.Errorf("routing %s: listing cards: %w", brief.ID, err)
 	}
 	pool := q.candidates(brief, rows)
+	if q.shouldSpawn(brief, pool) {
+		// A real gap: no existing ant clears the match floor for this class, so
+		// the queen breeds one seeded from the neighborhood's memory.
+		newborn, err := q.spawn(ctx, brief)
+		if err != nil {
+			return Assignment{}, fmt.Errorf("routing %s: spawning for class %s: %w", brief.ID, brief.Class, err)
+		}
+		return spawnAssignment(brief, newborn), nil
+	}
 	if len(pool) == 0 {
 		return Assignment{}, fmt.Errorf("routing %s: no eligible ant for class %s", brief.ID, brief.Class)
 	}
