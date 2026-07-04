@@ -285,6 +285,78 @@ func TestPromptPrefixStableAcrossTurns(t *testing.T) {
 	}
 }
 
+// TestProjectMemoryRidesBlockTwoNotBlockOne proves the D21/D14 split: the
+// merged project memory is injected as the system-reminder-wrapped block
+// two, and block one's bytes do not move when memory is present, so the
+// cache prefix stays stable no matter what a repo's ARI.md holds.
+func TestProjectMemoryRidesBlockTwoNotBlockOne(t *testing.T) {
+	const rule = "Always run make check before you push."
+	// One root for both runs, so block one's environment line is fixed and
+	// the only variable is whether ARI.md exists on disk.
+	root := t.TempDir()
+	run := func(t *testing.T, withMemory bool) provider.Request {
+		t.Helper()
+		rec := &recorder{inner: scripted.New(scripted.Response{
+			Text:  "ok",
+			Usage: provider.Usage{Input: 10, Output: 2},
+			Stop:  "end_turn",
+		})}
+		ari := filepath.Join(root, "ARI.md")
+		if withMemory {
+			if err := os.WriteFile(ari, []byte(rule+"\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		} else if err := os.Remove(ari); err != nil && !os.IsNotExist(err) {
+			t.Fatal(err)
+		}
+		c := openWorkerColony(t, root, rec, nil)
+		ctx := context.Background()
+		sub, err := c.Events(ctx, core.EventFilter{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		sid, err := c.NewSession(ctx, core.NewSessionRequest{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := c.Submit(ctx, core.SubmitRequest{Session: sid, Text: "go", Mode: core.ModeFullAuto}); err != nil {
+			t.Fatal(err)
+		}
+		collect(t, sub, event.TypeTurnFinished)
+		reqs := rec.Requests()
+		if len(reqs) == 0 {
+			t.Fatal("provider saw no requests")
+		}
+		return reqs[0]
+	}
+
+	with := run(t, true)
+	without := run(t, false)
+
+	// Block one is byte-identical whether or not the repo carries memory.
+	if a, b := mustJSON(t, with.System), mustJSON(t, without.System); a != b {
+		t.Errorf("block one moved with project memory present, breaking the cache (D14):\nwith:    %s\nwithout: %s", a, b)
+	}
+
+	// The rule reached block two, wrapped as a system-reminder with the
+	// override framing, and never leaked into block one.
+	b2 := with.Messages[0].Blocks[0].Text
+	if !strings.Contains(b2, rule) {
+		t.Errorf("ARI.md rule missing from block two:\n%s", b2)
+	}
+	if !strings.Contains(b2, "<system-reminder>") {
+		t.Errorf("block two is not wrapped as a system-reminder:\n%s", b2)
+	}
+	if !strings.Contains(b2, "override default behavior") {
+		t.Errorf("block two is missing the override framing:\n%s", b2)
+	}
+	for _, blk := range with.System {
+		if strings.Contains(blk.Text, rule) {
+			t.Errorf("project memory leaked into block one:\n%s", blk.Text)
+		}
+	}
+}
+
 // stubMemory is the M0 stand-in proving the seam is threaded: the runner
 // asks it for the pinned index and renders what it returns.
 type stubMemory struct{ index string }

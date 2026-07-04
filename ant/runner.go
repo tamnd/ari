@@ -16,6 +16,7 @@ import (
 	"github.com/tamnd/ari/core"
 	"github.com/tamnd/ari/event"
 	"github.com/tamnd/ari/kernel/ledger"
+	"github.com/tamnd/ari/memory"
 	"github.com/tamnd/ari/nest"
 	"github.com/tamnd/ari/permission"
 	"github.com/tamnd/ari/provider"
@@ -230,9 +231,17 @@ func (r *Runner) blockTwoContext(ctx context.Context, card Card) Context {
 			c.PinnedIndex = idx
 		}
 	}
-	if data, err := os.ReadFile(r.nest.ARIMD()); err == nil {
-		c.ProjectMemory = strings.TrimSpace(string(data))
-	}
+	// Project memory is discovered by walking the tree, not read from one
+	// fixed path: ARI.md plus the honored AGENTS.md and CLAUDE.md, with
+	// @-imports resolved and the per-file cap applied (D21, doc 01 section
+	// 7.2). The cwd is the process's working directory; the walk stops at
+	// the git root.
+	cwd, _ := os.Getwd()
+	c.ProjectMemory = memory.Load(memory.Options{
+		Cwd:       cwd,
+		Root:      r.nest.Root,
+		GlobalDir: r.nest.Global,
+	})
 	status := r.GitStatus
 	if status == nil {
 		status = gitStatus
