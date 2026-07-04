@@ -62,6 +62,12 @@ type TrailStore interface {
 	// Load returns the decayed trail, or the beta(1,1) prior when the ant has
 	// no history on the class.
 	Load(ctx context.Context, ant string, class TaskClass) (Trail, error)
+	// MeanTokens returns the historical mean token cost of the class across
+	// every ant that has run it, the crude per-class cost the fan-out gate
+	// projects a split against (doc 06 section 5.3). The second return is false
+	// when the class has no history at all, which the gate reads as an uncertain
+	// estimate and refuses on, the safe direction for the milestone.
+	MeanTokens(ctx context.Context, class TaskClass) (int64, bool, error)
 }
 
 // sqliteTrailStore is the colony.db-backed TrailStore.
@@ -175,6 +181,28 @@ func (s *sqliteTrailStore) Sample(ctx context.Context, ant string, class TaskCla
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return betaSample(s.rng, t.Success, t.Failure), nil
+}
+
+// MeanTokens sums the token totals and task counts for the class across every
+// ant and divides, giving the per-class mean the fan-out gate projects
+// against. It does not decay: a token cost is a fact about what a class cost to
+// run, not a fitness belief that should fade. When no ant has run the class,
+// the count is zero and the estimate is undefined, so ok is false and the gate
+// refuses rather than guess.
+func (s *sqliteTrailStore) MeanTokens(ctx context.Context, class TaskClass) (int64, bool, error) {
+	var tokens, n sql.NullInt64
+	err := s.db.Read(ctx, func(db *sql.DB) error {
+		return db.QueryRowContext(ctx,
+			`SELECT SUM(tokens), SUM(n) FROM trails WHERE class = ?`, class).
+			Scan(&tokens, &n)
+	})
+	if err != nil {
+		return 0, false, err
+	}
+	if !n.Valid || n.Int64 == 0 {
+		return 0, false, nil
+	}
+	return tokens.Int64 / n.Int64, true, nil
 }
 
 // decayed applies the half-life to a count over an age: a count untouched for

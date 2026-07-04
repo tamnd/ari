@@ -25,17 +25,22 @@ type RouteConfig struct {
 	Epsilon        float64 // forced-exploration floor, D13
 	SignalBonus    float64 // per-hit signal bonus added to match
 	SignalBonusCap float64 // ceiling on the total signal bonus, anti-gaming
+
+	CoordinationOverhead int64   // per-subtask handoff tax the fan-out gate adds to its projection
+	SpecialistEdge       float64 // margin above the neutral prior a specialist's fitness must clear
 }
 
 // DefaultRouteConfig is the shipping default: match-leaning fusion, a small
 // exploration epsilon, and a capped signal bonus.
 func DefaultRouteConfig() RouteConfig {
 	return RouteConfig{
-		WMatch:         0.7,
-		WFit:           0.3,
-		Epsilon:        0.05,
-		SignalBonus:    0.02,
-		SignalBonusCap: 0.1,
+		WMatch:               0.7,
+		WFit:                 0.3,
+		Epsilon:              0.05,
+		SignalBonus:          0.02,
+		SignalBonusCap:       0.1,
+		CoordinationOverhead: 2000,
+		SpecialistEdge:       0.15,
 	}
 }
 
@@ -73,6 +78,7 @@ type RoutingReason struct {
 	Winner     string      `json:"winner"`
 	Explored   bool        `json:"explored"`
 	Summary    string      `json:"summary"`
+	FanOut     *FanOutArg  `json:"fanout,omitempty"` // present only when the D5 gate approved a split
 }
 
 // candidate is the internal scoring row before it is frozen into the journal.
