@@ -1,12 +1,19 @@
-// Package ant is the population side of the colony: the card contract,
-// the prompt assembly, and the runner that puts the agent loop behind
-// the core's TurnRunner seam. M0 ships exactly one ant, the pi-shaped
-// worker; everything here is written so a second ant is a row of data,
-// never a new type (D3, D4).
-package ant
+// Package colony is the kernel of the colony: the ant card contract the
+// queen routes on, the typed handoffs that are the only currency between
+// ants, the blackboard they coordinate over, and the queen herself, a
+// router and spawner that never issues a reasoning turn (D5, doc 06). It is
+// kernel, not UI: it may never import a view, and a colony view is a pure
+// projection of the events this package emits (D2, section 4).
+//
+// M3 lands the card here, where the plan's repo shape puts it (section 11),
+// so the routing types live in the kernel and the population side in package
+// ant depends on them, not the other way round. M0 shipped one ant; a second
+// is still a row of data, never a new type (D3, D4).
+package colony
 
 import (
 	"fmt"
+	"slices"
 	"time"
 )
 
@@ -21,6 +28,32 @@ const (
 	TierCheap    ModelTier = "cheap"
 	TierLocal    ModelTier = "local"
 )
+
+// knownTier reports whether t is one of the four tiers the registry
+// resolves. A card naming a tier outside this set can never resolve to a
+// provider chain, so registration refuses it at load rather than at the
+// first turn (slice 1 DoD).
+func knownTier(t ModelTier) bool {
+	switch t {
+	case TierFrontier, TierMid, TierCheap, TierLocal:
+		return true
+	}
+	return false
+}
+
+// coreTools is the D7 six, the only tools a card may allowlist. A card
+// naming a tool outside this set is refused at load, because a routing
+// filter that let an unknown tool through would match on a capability no
+// worker can actually run.
+var coreTools = map[string]bool{
+	"read": true, "find": true, "write": true,
+	"edit": true, "sh": true, "fetch": true,
+}
+
+// patchKind is the produced-handoff kind that marks a card as a mutator.
+// A card that produces a Patch changes files, so D4's probe-before-mutate
+// applies to it and MutatesWithoutProbe reads this to decide.
+const patchKind = "patch"
 
 // TaskClass is one coarse task class in the small controlled vocabulary
 // the queen prefilters on before spending an embedding call (doc 06).
@@ -49,6 +82,13 @@ type CommandSpec struct {
 	Produces []string `json:"produces"`
 }
 
+// Mutates reports whether this ant produces a Patch, and so changes files.
+// It is the load-time reading of D4's probe-before-mutate: a mutator owes
+// an inspection command, a pure producer of Findings or replies does not.
+func (c CommandSpec) Mutates() bool {
+	return slices.Contains(c.Produces, patchKind)
+}
+
 // InspectSpec is the I section: read-only probes. Probe-before-mutate
 // (D4) is enforced here: an ant that mutates must list an inspection
 // that shows what it would touch before it touches it.
@@ -70,10 +110,17 @@ type VerifySpec struct {
 	Check    string   `json:"check"`
 }
 
+// IsEmpty reports whether the card names no verification story. The check
+// is the story's core, so a card with no Check has nothing that says how
+// its output is verified, and slice 3's registration refuses it (D4).
+func (v VerifySpec) IsEmpty() bool {
+	return v.Check == ""
+}
+
 // DiscoverySpec is the D section, the routing-facing description.
-// Summary is what gets embedded to SkillVec; Classes are the coarse
-// prefilter; Signals are cheap string cues (globs, languages, symbols)
-// the queen can match without an embedding call (doc 06 section 2.1).
+// Summary is what gets embedded to the card's SkillVec; Classes are the
+// coarse prefilter; Signals are cheap string cues (globs, languages,
+// symbols) the queen can match without an embedding call (doc 06 2.1).
 type DiscoverySpec struct {
 	Summary string      `json:"summary"`
 	Classes []TaskClass `json:"classes"`
@@ -118,8 +165,20 @@ type Card struct {
 	Revised time.Time  `json:"revised,omitzero"`
 }
 
+// MutatesWithoutProbe reports the D4 violation that carries real design
+// weight: a card that produces a Patch but declares no read-only probe to
+// show what the patch would touch first. Making this a load-time invariant
+// is how probe-before-mutate becomes something the router can trust instead
+// of a hope, because a mutator that cannot say what it would touch is
+// refused before it can touch anything.
+func (c Card) MutatesWithoutProbe() bool {
+	return c.Commands.Mutates() && len(c.Inspect.Probes) == 0
+}
+
 // Validate enforces the D4 floor: every letter of S/C/I/R/V/D must say
-// something, and an ant with no verification story does not register.
+// something, the tier and tools must be ones the runtime knows, and a
+// mutator must carry a probe. It is the structural gate; slice 3's
+// registration adds the verification-story refusal on top of it.
 func (c Card) Validate() error {
 	switch {
 	case c.ID == "" || c.Name == "":
@@ -128,18 +187,27 @@ func (c Card) Validate() error {
 		return fmt.Errorf("card %s: the S section needs a memory namespace", c.Name)
 	case len(c.Commands.Accepts) == 0 || len(c.Commands.Produces) == 0:
 		return fmt.Errorf("card %s: the C section needs accepted and produced kinds", c.Name)
-	case len(c.Inspect.Probes) == 0:
-		return fmt.Errorf("card %s: the I section needs at least one read-only probe", c.Name)
+	case c.MutatesWithoutProbe():
+		return fmt.Errorf("card %s: a card that produces a patch needs a read-only probe that shows what it would touch (D4)", c.Name)
 	case c.Render.Style == "":
 		return fmt.Errorf("card %s: the R section needs a render style", c.Name)
-	case len(c.Verify.Fixtures) == 0 || c.Verify.Check == "":
+	case len(c.Verify.Fixtures) == 0 || c.Verify.IsEmpty():
 		return fmt.Errorf("card %s: no ant registers without a verification story (D4)", c.Name)
-	case c.Discovery.Summary == "" || len(c.Discovery.Classes) == 0:
-		return fmt.Errorf("card %s: the D section needs a summary and task classes", c.Name)
+	case c.Discovery.Summary == "":
+		return fmt.Errorf("card %s: the D section needs a summary; it is what the SkillVec embeds", c.Name)
+	case len(c.Discovery.Classes) == 0:
+		return fmt.Errorf("card %s: the D section needs at least one task class", c.Name)
 	case c.Tier == "":
 		return fmt.Errorf("card %s: a model tier is required (D17)", c.Name)
+	case !knownTier(c.Tier):
+		return fmt.Errorf("card %s: unknown tier %q, want one of frontier, mid, cheap, local", c.Name, c.Tier)
 	case len(c.Tools) == 0:
 		return fmt.Errorf("card %s: an empty tool allowlist can do nothing", c.Name)
+	}
+	for _, t := range c.Tools {
+		if !coreTools[t] {
+			return fmt.Errorf("card %s: unknown tool %q, want a subset of read, find, write, edit, sh, fetch", c.Name, t)
+		}
 	}
 	return nil
 }

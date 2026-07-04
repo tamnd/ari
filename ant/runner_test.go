@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tamnd/ari/colony"
 	"github.com/tamnd/ari/config"
 	"github.com/tamnd/ari/core"
 	"github.com/tamnd/ari/event"
@@ -112,7 +113,7 @@ func TestWorkerReadEditVerify(t *testing.T) {
 
 	// The card's V section names the fixture; loading it through the card
 	// is what makes the card a test fixture, not just routing data (D4).
-	s, err := eval.LoadScript(WorkerCard().Verify.Fixtures[0])
+	s, err := eval.LoadScript(colony.WorkerCard().Verify.Fixtures[0])
 	if err != nil {
 		t.Fatal(err)
 	}

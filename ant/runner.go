@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/tamnd/ari/agent"
+	"github.com/tamnd/ari/colony"
 	"github.com/tamnd/ari/core"
 	"github.com/tamnd/ari/event"
 	"github.com/tamnd/ari/hook"
@@ -215,7 +216,7 @@ func (r *Runner) workerFor(ctx context.Context, t *core.TurnHandle) (*worker, er
 // Everything computed here is session-stable by construction, which is
 // what keeps blocks one and two byte-identical across turns (D14).
 func (r *Runner) wake(ctx context.Context, t *core.TurnHandle) (*worker, error) {
-	card := WorkerCard()
+	card := colony.WorkerCard()
 	if err := card.Validate(); err != nil {
 		return nil, core.Wrap(core.ErrInternal, err, "validating the worker card")
 	}
@@ -505,7 +506,7 @@ func (b *hookBridge) Stop(ctx context.Context) agent.HookResult {
 // blockTwoContext gathers the session-stable inputs for block two: the
 // pinned index from the memory seam when one is wired, ARI.md, and git
 // status at session start (doc 03 section 8).
-func (r *Runner) blockTwoContext(ctx context.Context, card Card, window int, skills []skill.Skill) Context {
+func (r *Runner) blockTwoContext(ctx context.Context, card colony.Card, window int, skills []skill.Skill) Context {
 	var c Context
 	if r.Memory != nil {
 		if idx, err := r.Memory.PinnedIndex(ctx, card.State.Namespace); err == nil {
@@ -563,7 +564,7 @@ func gitStatus(root string) string {
 // map, one tool allowlist, communicating outward only through the event
 // stream (doc 01 section 6.2).
 type worker struct {
-	card        Card
+	card        colony.Card
 	loop        *agent.Loop
 	tc          *tool.ToolContext
 	pipe        *permission.Pipeline

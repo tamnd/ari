@@ -10,7 +10,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/tamnd/ari/ant"
+	"github.com/tamnd/ari/colony"
 	"github.com/tamnd/ari/memory"
 	memsqlite "github.com/tamnd/ari/memory/sqlite"
 	"github.com/tamnd/ari/nest"
@@ -54,7 +54,7 @@ var memoryImportCmd = &cobra.Command{
 }
 
 func init() {
-	def := ant.WorkerCard().State.Namespace
+	def := colony.WorkerCard().State.Namespace
 	memoryExportCmd.Flags().String("namespace", def, "the memory namespace to export")
 	memoryExportCmd.Flags().String("out", "", "write to this file instead of stdout")
 	memoryImportCmd.Flags().String("namespace", def, "the memory namespace to import into")

@@ -11,6 +11,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/tamnd/ari/ant"
+	"github.com/tamnd/ari/colony"
 	"github.com/tamnd/ari/config"
 	"github.com/tamnd/ari/core"
 	"github.com/tamnd/ari/nest"
@@ -36,6 +37,10 @@ func runTUI(c *cobra.Command) error {
 	if err != nil {
 		return err
 	}
+
+	// Read the worker namespace before the local colony var shadows the
+	// package name for the rest of this function.
+	ns := colony.WorkerCard().State.Namespace
 
 	runner := ant.NewRunner()
 	colony, err := core.Open(ctx, cwd,
@@ -74,7 +79,7 @@ func runTUI(c *cobra.Command) error {
 
 	broker := bus.New[btea.Msg]()
 	m := ui.New(ui.Options{
-		Client:        colonyClient{c: colony, ns: ant.WorkerCard().State.Namespace},
+		Client:        colonyClient{c: colony, ns: ns},
 		Theme:         th,
 		Keys:          keys.Default(),
 		FirstRun:      firstRun(n),
@@ -84,7 +89,7 @@ func runTUI(c *cobra.Command) error {
 		Models:        tierModels(cfg),
 		ContextWindow: contextWindow,
 		Session:       session,
-		Namespace:     ant.WorkerCard().State.Namespace,
+		Namespace:     ns,
 		Drops:         broker.Dropped,
 		Onboarded:     onboarded(n),
 	})
