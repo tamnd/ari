@@ -22,10 +22,12 @@ const (
 )
 
 type shArgs struct {
-	Command     string `json:"command"`           // the command line, required
+	Command     string `json:"command"`           // the command line, required unless job is set
 	Timeout     int    `json:"timeout,omitempty"` // ms, capped by the max
 	Background  bool   `json:"run_in_background,omitempty"`
 	Description string `json:"description,omitempty"` // one-line human summary
+	Job         string `json:"job,omitempty"`         // an existing background shell id to read or kill
+	Kill        bool   `json:"kill,omitempty"`        // with job, terminate it; otherwise read its output
 }
 
 // ShDisplay is the typed data the UI renders for a shell result: the
@@ -61,12 +63,13 @@ func (shTool) Schema() Schema {
 		Params: json.RawMessage(`{
 			"type": "object",
 			"properties": {
-				"command": {"type": "string", "description": "The command line to run."},
+				"command": {"type": "string", "description": "The command line to run. Required unless job is set."},
 				"timeout": {"type": "integer", "description": "Timeout in milliseconds, capped by the configured maximum."},
 				"run_in_background": {"type": "boolean", "description": "Run detached and return a shell id immediately."},
-				"description": {"type": "string", "description": "One-line human summary of what this command does."}
-			},
-			"required": ["command"]
+				"description": {"type": "string", "description": "One-line human summary of what this command does."},
+				"job": {"type": "string", "description": "An existing background shell id (from run_in_background) to read the accumulated output of; combine with kill to stop it."},
+				"kill": {"type": "boolean", "description": "With job, terminate that background shell and return its final output."}
+			}
 		}`),
 	}
 }
@@ -90,6 +93,10 @@ func shArgsReadOnly(a json.RawMessage) bool {
 	if json.Unmarshal(a, &args) != nil {
 		return false
 	}
+	if args.Job != "" {
+		// Reading a background job's output touches no state; killing it does.
+		return !args.Kill
+	}
 	if args.Background {
 		return false
 	}
@@ -109,6 +116,9 @@ func (shTool) ValidateInput(_ context.Context, raw json.RawMessage, _ *ToolConte
 	if err := json.Unmarshal(raw, &a); err != nil {
 		return fmt.Errorf("arguments did not decode: %v", err)
 	}
+	if a.Job != "" {
+		return nil // reading or killing a background shell needs no command
+	}
 	if strings.TrimSpace(a.Command) == "" {
 		return fmt.Errorf("command is required")
 	}
@@ -124,6 +134,9 @@ func (s shTool) Call(ctx context.Context, raw json.RawMessage, tc *ToolContext, 
 		return nil, err
 	}
 
+	if a.Job != "" {
+		return s.reportBackground(a)
+	}
 	if a.Background {
 		return s.startBackground(ctx, a, tc)
 	}
@@ -241,9 +254,67 @@ func (s shTool) startBackground(ctx context.Context, a shArgs, tc *ToolContext) 
 	}, nil
 }
 
+// reportBackground reads or kills an existing background shell by id. A
+// read returns the output accumulated so far and the job's status; a kill
+// terminates the process group and returns the final output. This is how a
+// long build launched in one turn is inspected or stopped in a later one,
+// all through sh rather than a seventh tool (doc 04 section 7.4, D7).
+func (s shTool) reportBackground(a shArgs) (*Result, error) {
+	job := s.bg.get(a.Job)
+	if job == nil {
+		return nil, fmt.Errorf("no background shell %q; it was never started or the session ended", a.Job)
+	}
+	if a.Kill {
+		job.Kill()
+		<-job.Done // block until the wait goroutine has reaped it
+	}
+
+	output := job.Output()
+	var status string
+	select {
+	case <-job.Done:
+		if job.Killed() {
+			status = "killed"
+		} else {
+			status = fmt.Sprintf("exited %d", job.ExitCode())
+		}
+	default:
+		status = "running"
+	}
+
+	model := output
+	if model == "" {
+		model = "(no output yet)"
+	}
+	model = fmt.Sprintf("background shell %s is %s\n%s", a.Job, status, model)
+	return &Result{
+		Model: model,
+		Display: ShDisplay{
+			Command:    "job " + a.Job,
+			Output:     output,
+			ExitCode:   job.ExitCode(),
+			Killed:     job.Killed(),
+			Background: a.Job,
+		},
+	}, nil
+}
+
 // Background returns the session's background-shell registry, for the
 // loop to surface output and exits.
 func (s shTool) Background() *bgShells { return s.bg }
+
+// CloseBackground kills every background shell the session left running and
+// waits for each to be reaped, so a detached build cannot outlive the
+// session that spawned it. The runner calls it on session close, which
+// bounds the job pile the process model warns against (doc 01 section 6.1).
+func (s shTool) CloseBackground() error { return s.bg.closeAll() }
+
+// BackgroundCloser is implemented by a tool that owns detached processes it
+// must reap when the session ends. The runner resolves it off the registry
+// so it never has to name sh directly.
+type BackgroundCloser interface {
+	CloseBackground() error
+}
 
 // bgShells is the per-session registry of detached shells.
 type bgShells struct {
@@ -256,10 +327,11 @@ type bgJob struct {
 	ID   string
 	Done chan struct{}
 
-	mu   sync.Mutex
-	buf  bytes.Buffer
-	exit int
-	cmd  *exec.Cmd
+	mu     sync.Mutex
+	buf    bytes.Buffer
+	exit   int
+	killed bool
+	cmd    *exec.Cmd
 }
 
 func newBgShells() *bgShells { return &bgShells{jobs: map[string]*bgJob{}} }
@@ -297,6 +369,27 @@ func (b *bgShells) get(id string) *bgJob {
 	return b.jobs[id]
 }
 
+// closeAll kills every registered job's process group and waits for each to
+// be reaped, so no detached shell outlives the session.
+func (b *bgShells) closeAll() error {
+	b.mu.Lock()
+	jobs := make([]*bgJob, 0, len(b.jobs))
+	for _, j := range b.jobs {
+		jobs = append(jobs, j)
+	}
+	b.mu.Unlock()
+	for _, j := range jobs {
+		select {
+		case <-j.Done:
+			continue // already finished, nothing to kill
+		default:
+		}
+		j.Kill()
+		<-j.Done
+	}
+	return nil
+}
+
 // Output returns what the job has written so far, secrets redacted.
 func (j *bgJob) Output() string {
 	j.mu.Lock()
@@ -311,8 +404,22 @@ func (j *bgJob) ExitCode() int {
 	return j.exit
 }
 
-// Kill terminates the job's whole process group.
-func (j *bgJob) Kill() { killGroup(j.cmd, shKillGrace) }
+// Kill terminates the job's whole process group and records that it ended by
+// a kill rather than by exiting on its own.
+func (j *bgJob) Kill() {
+	j.mu.Lock()
+	j.killed = true
+	j.mu.Unlock()
+	killGroup(j.cmd, shKillGrace)
+}
+
+// Killed reports whether the job was terminated by Kill rather than exiting
+// on its own. It is only meaningful after Done is closed.
+func (j *bgJob) Killed() bool {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	return j.killed
+}
 
 type bgWriter struct{ job *bgJob }
 
