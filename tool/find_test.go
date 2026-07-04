@@ -29,11 +29,14 @@ func touch(t *testing.T, path string, at time.Time) {
 	}
 }
 
+// TestGlobRanksByMtimeNewestFirst isolates the mtime tiebreak: with every
+// file at the same depth and none touched this session, the higher-strength
+// ranking signals are equal, so modification time newest-first decides.
 func TestGlobRanksByMtimeNewestFirst(t *testing.T) {
 	tc := testContext(t)
 	base := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
 	old := writeFile(t, tc.Cwd, "old.go", "package a\n")
-	mid := writeFile(t, tc.Cwd, "sub/mid.go", "package b\n")
+	mid := writeFile(t, tc.Cwd, "mid.go", "package b\n")
 	fresh := writeFile(t, tc.Cwd, "fresh.go", "package c\n")
 	writeFile(t, tc.Cwd, "notes.txt", "not go\n")
 	touch(t, old, base)
@@ -77,6 +80,68 @@ func TestContentSearchRanksByMatchCountThenMtime(t *testing.T) {
 	}
 	if d.Total != 4 || d.Capped || len(d.Files) != 2 {
 		t.Errorf("display = %+v", d)
+	}
+}
+
+// TestRankingPrefersSessionTouchedFiles: a file the ant already read this
+// session leads even when an untouched file is alphabetically earlier and
+// fresher, because touched is the strongest ranking signal.
+func TestRankingPrefersSessionTouchedFiles(t *testing.T) {
+	tc := testContext(t)
+	base := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
+	cold := writeFile(t, tc.Cwd, "aaa.go", "needle\n")
+	warm := writeFile(t, tc.Cwd, "zzz.go", "needle\n")
+	touch(t, cold, base.Add(time.Hour)) // fresher and alphabetically first
+	touch(t, warm, base)
+	tc.Files.Set(warm, "hash", base, 1) // the ant read zzz.go this session
+
+	res, err := callFind(t, tc, `{"content":"needle"}`)
+	if err != nil {
+		t.Fatalf("find: %v", err)
+	}
+	want := warm + ":1: needle\n" + cold + ":1: needle\n"
+	if res.Model != want {
+		t.Errorf("touched file should lead:\n got %q\nwant %q", res.Model, want)
+	}
+}
+
+// TestRankingPrefersFilesNearerTheCwd: with neither file touched, the one
+// nearer the working directory leads even if the far one is fresher.
+func TestRankingPrefersFilesNearerTheCwd(t *testing.T) {
+	tc := testContext(t)
+	base := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
+	near := writeFile(t, tc.Cwd, "near.go", "needle\n")
+	far := writeFile(t, tc.Cwd, "a/b/c/far.go", "needle\n")
+	touch(t, near, base)
+	touch(t, far, base.Add(time.Hour)) // fresher, but three levels down
+
+	res, err := callFind(t, tc, `{"content":"needle"}`)
+	if err != nil {
+		t.Fatalf("find: %v", err)
+	}
+	want := near + ":1: needle\n" + far + ":1: needle\n"
+	if res.Model != want {
+		t.Errorf("nearer file should lead:\n got %q\nwant %q", res.Model, want)
+	}
+}
+
+// TestRankingPrefersSourceOverGenerated: at equal depth and freshness, a
+// hand-written source file leads a generated one.
+func TestRankingPrefersSourceOverGenerated(t *testing.T) {
+	tc := testContext(t)
+	base := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
+	gen := writeFile(t, tc.Cwd, "api.pb.go", "needle\n")
+	src := writeFile(t, tc.Cwd, "server.go", "needle\n")
+	touch(t, gen, base.Add(time.Hour)) // fresher and alphabetically first
+	touch(t, src, base)
+
+	res, err := callFind(t, tc, `{"content":"needle"}`)
+	if err != nil {
+		t.Fatalf("find: %v", err)
+	}
+	want := src + ":1: needle\n" + gen + ":1: needle\n"
+	if res.Model != want {
+		t.Errorf("source file should lead the generated one:\n got %q\nwant %q", res.Model, want)
 	}
 }
 

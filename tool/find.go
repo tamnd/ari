@@ -130,11 +130,12 @@ func (findTool) Call(ctx context.Context, raw json.RawMessage, tc *ToolContext, 
 		return nil, err
 	}
 
+	rk := newRanker(tc)
 	if a.Content == "" {
-		return findPaths(files, limit), nil
+		return findPaths(files, limit, rk), nil
 	}
 	re := regexp.MustCompile(a.Content)
-	return findContent(ctx, files, re, limit)
+	return findContent(ctx, files, re, limit, rk)
 }
 
 // candidate is one file the walk kept.
@@ -186,11 +187,18 @@ func walkTree(ctx context.Context, root, glob string) ([]candidate, error) {
 	return out, nil
 }
 
-// findPaths renders a glob-only search: matches ordered by modification
-// time newest first, because the file a model is looking for in a live
-// task is usually one that changed recently (doc 04 section 8.2).
-func findPaths(files []candidate, limit int) *Result {
+// findPaths renders a glob-only search. The ranking pass orders the set so
+// the hits a model most likely wants survive the cap: session-touched files
+// first, then files nearer the cwd, then source over generated or vendored,
+// with modification time newest first breaking any remaining tie (doc 04
+// section 8.2).
+func findPaths(files []candidate, limit int, rk ranker) *Result {
+	keys := rankKeys(files, rk)
 	sort.SliceStable(files, func(i, j int) bool {
+		ki, kj := keys[files[i].path], keys[files[j].path]
+		if ki != kj {
+			return ki.less(kj)
+		}
 		if !files[i].mtime.Equal(files[j].mtime) {
 			return files[i].mtime.After(files[j].mtime)
 		}
@@ -223,11 +231,12 @@ type fileHits struct {
 	matches []FindMatch
 }
 
-// findContent renders a content search: matches grouped by file, files
-// ordered by match count then mtime, so the densest, freshest hits are
-// at the top where a truncated result still shows them (doc 04
-// section 8.2).
-func findContent(ctx context.Context, files []candidate, re *regexp.Regexp, limit int) (*Result, error) {
+// findContent renders a content search: matches grouped by file. The
+// ranking pass orders the files by the same key as findPaths, session-touched
+// then nearer the cwd then source over generated, and only within a tie does
+// the older signal apply, densest then freshest, so a truncated result still
+// shows the part the model most likely needs (doc 04 section 8.2).
+func findContent(ctx context.Context, files []candidate, re *regexp.Regexp, limit int, rk ranker) (*Result, error) {
 	var hits []fileHits
 	total := 0
 	for _, f := range files {
@@ -249,7 +258,15 @@ func findContent(ctx context.Context, files []candidate, re *regexp.Regexp, limi
 			total += len(ms)
 		}
 	}
+	keys := make(map[string]rankKey, len(hits))
+	for _, h := range hits {
+		keys[h.path] = rk.key(h.path)
+	}
 	sort.SliceStable(hits, func(i, j int) bool {
+		ki, kj := keys[hits[i].path], keys[hits[j].path]
+		if ki != kj {
+			return ki.less(kj)
+		}
 		if len(hits[i].matches) != len(hits[j].matches) {
 			return len(hits[i].matches) > len(hits[j].matches)
 		}
@@ -284,6 +301,145 @@ func findContent(ctx context.Context, files []candidate, re *regexp.Regexp, limi
 		fmt.Fprintf(&b, "\nshowing the top %d of %d matches, tighten the glob or add a path to see the rest\n", shown, total)
 	}
 	return &Result{Model: b.String(), Display: display}, nil
+}
+
+// ranker scores a file path for ordering within find's result set. Lower
+// sorts earlier. It reads the session file-state map for the touched signal
+// and the cwd for the proximity signal, both already on the ToolContext, so
+// the ranking reuses state that exists rather than tracking a second history
+// (doc 04 section 9).
+type ranker struct {
+	files *FileState
+	cwd   string
+}
+
+func newRanker(tc *ToolContext) ranker {
+	if tc == nil {
+		return ranker{}
+	}
+	return ranker{files: tc.Files, cwd: tc.Cwd}
+}
+
+// rankKey is the ordered ranking tuple for one file. The fields are compared
+// in strength order, so a session-touched file always outranks an untouched
+// one no matter the other signals, and so on down. Every field is an int, so
+// the key is comparable and the ordering is deterministic and golden-testable.
+type rankKey struct {
+	untouched int // 0 if read or written this session, else 1
+	distance  int // directory hops from the cwd, upward hops counted double
+	generated int // 0 for source, 1 for generated or vendored
+}
+
+// less reports whether a sorts before b, comparing the signals in strength
+// order (doc 04 section 8.2).
+func (a rankKey) less(b rankKey) bool {
+	if a.untouched != b.untouched {
+		return a.untouched < b.untouched
+	}
+	if a.distance != b.distance {
+		return a.distance < b.distance
+	}
+	return a.generated < b.generated
+}
+
+// key computes the ranking tuple for one absolute path.
+func (r ranker) key(p string) rankKey {
+	return rankKey{
+		untouched: boolToInt(!r.touched(p)),
+		distance:  r.distance(p),
+		generated: boolToInt(isGenerated(p)),
+	}
+}
+
+// touched reports whether the ant read or wrote this path this session.
+func (r ranker) touched(p string) bool {
+	if r.files == nil {
+		return false
+	}
+	_, ok := r.files.Entry(p)
+	return ok
+}
+
+// distance counts the directory hops from the cwd to the file. A file in the
+// cwd is zero; each level deeper is one; each step above the cwd counts double
+// so a match under the working tree beats one outside it.
+func (r ranker) distance(p string) int {
+	if r.cwd == "" {
+		return 0
+	}
+	rel, err := filepath.Rel(r.cwd, p)
+	if err != nil {
+		return 1 << 20 // an uncomparable path sorts last
+	}
+	rel = filepath.ToSlash(rel)
+	if rel == "." {
+		return 0
+	}
+	segs := strings.Split(rel, "/")
+	hops := len(segs) - 1 // the last segment is the filename
+	for _, s := range segs {
+		if s == ".." {
+			hops++
+		}
+	}
+	return hops
+}
+
+// generatedDirs are path segments that mark a subtree as generated or
+// vendored output rather than hand-written source.
+var generatedDirs = map[string]bool{
+	"vendor":       true,
+	"node_modules": true,
+	"dist":         true,
+	"build":        true,
+	"generated":    true,
+	"gen":          true,
+	"out":          true,
+	".next":        true,
+}
+
+// generatedSuffixes are filename endings that mark a file as generated.
+var generatedSuffixes = []string{
+	".pb.go", "_generated.go", "_gen.go", ".min.js", ".min.css", ".g.dart",
+}
+
+// isGenerated reports whether a path looks like generated or vendored output,
+// by a marker directory in the path or a generated-file suffix. It is a
+// documented heuristic, not a build-system query, so it stays deterministic.
+func isGenerated(p string) bool {
+	slash := filepath.ToSlash(p)
+	for _, seg := range strings.Split(slash, "/") {
+		if generatedDirs[seg] {
+			return true
+		}
+	}
+	base := path.Base(slash)
+	if strings.Contains(base, ".generated.") {
+		return true
+	}
+	for _, suf := range generatedSuffixes {
+		if strings.HasSuffix(base, suf) {
+			return true
+		}
+	}
+	return false
+}
+
+// rankKeys precomputes the ranking tuple for each candidate, so the sort
+// comparator never recomputes a key.
+func rankKeys(files []candidate, rk ranker) map[string]rankKey {
+	keys := make(map[string]rankKey, len(files))
+	for _, f := range files {
+		keys[f.path] = rk.key(f.path)
+	}
+	return keys
+}
+
+func boolToInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
 }
 
 // globMatch matches a slash-separated pattern against a relative path,
