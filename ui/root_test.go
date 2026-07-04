@@ -14,6 +14,7 @@ import (
 	"github.com/tamnd/ari/kernel/eval"
 	"github.com/tamnd/ari/ui/bus"
 	"github.com/tamnd/ari/ui/keys"
+	"github.com/tamnd/ari/ui/parts"
 	"github.com/tamnd/ari/ui/splash"
 	"github.com/tamnd/ari/ui/theme"
 )
@@ -29,6 +30,7 @@ type fakeClient struct {
 	hits     []MemoryHit
 	forgets  [][2]string // session, id
 	forgetOK bool
+	scripts  map[string][]parts.Part // ant key to its sidechain
 }
 
 func (f *fakeClient) NewSession(context.Context, string) (string, error) { return "s1", nil }
@@ -75,6 +77,12 @@ func (f *fakeClient) MemoryForget(_ context.Context, session, id string) (bool, 
 	defer f.mu.Unlock()
 	f.forgets = append(f.forgets, [2]string{session, id})
 	return f.forgetOK, nil
+}
+
+func (f *fakeClient) Transcript(_ context.Context, _, ant string) ([]parts.Part, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.scripts[ant], nil
 }
 
 // harness owns a root with a controllable clock.

@@ -341,6 +341,18 @@ func (c *Colony) Load(ctx context.Context, s SessionID) (session.Transcript, err
 	return t, nil
 }
 
+// LoadSidechain reads one worker ant's sidechain transcript under a session,
+// the read the colony drill-in renders. Narrow read access like Load: a value,
+// never a kernel handle, and an ant that never opened its file reads back empty
+// rather than erroring (doc 09 section 12.2).
+func (c *Colony) LoadSidechain(ctx context.Context, s SessionID, ant string) (session.Transcript, error) {
+	t, err := c.store.LoadSidechain(ctx, s, ant)
+	if err != nil {
+		return session.Transcript{}, Wrap(ErrNest, err, "loading the sidechain")
+	}
+	return t, nil
+}
+
 // Submit enqueues a user turn and returns its TurnID. The answer arrives
 // only as events (doc 01 section 4.2).
 func (c *Colony) Submit(ctx context.Context, req SubmitRequest) (TurnID, error) {
