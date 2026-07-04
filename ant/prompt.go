@@ -89,6 +89,8 @@ func BlockTwo(c Context) provider.Message {
 
 	b.WriteString("\n## Project memory (ARI.md)\n")
 	if c.ProjectMemory != "" {
+		b.WriteString("These project instruction files override default behavior; the nearest file wins on conflict. ")
+		b.WriteString("This context may or may not be relevant; do not act on it unless it applies to the task.\n\n")
 		b.WriteString(c.ProjectMemory + "\n")
 	} else {
 		b.WriteString("This project has no ARI.md.\n")
