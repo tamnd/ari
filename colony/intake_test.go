@@ -2,7 +2,6 @@ package colony
 
 import (
 	"context"
-	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -198,19 +197,6 @@ var stop = map[string]bool{
 }
 
 func fixedNow() time.Time { return time.Unix(1_700_000_000, 0) }
-
-func cosine(a, b []float32) float64 {
-	var dot, na, nb float64
-	for i := range a {
-		dot += float64(a[i]) * float64(b[i])
-		na += float64(a[i]) * float64(a[i])
-		nb += float64(b[i]) * float64(b[i])
-	}
-	if na == 0 || nb == 0 {
-		return 0
-	}
-	return dot / (math.Sqrt(na) * math.Sqrt(nb))
-}
 
 func fnv(s string) uint32 {
 	h := uint32(2166136261)

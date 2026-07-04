@@ -3,6 +3,8 @@ package colony
 import (
 	"context"
 	"fmt"
+	"math/rand/v2"
+	"sync"
 )
 
 // Queen is the colony's router and spawner. She never holds a Provider, a
@@ -17,14 +19,36 @@ import (
 // verification rule lives, because the queen is the only writer of a card
 // row with a live status.
 type Queen struct {
-	cards CardStore
+	cards  CardStore
+	trails TrailStore
+	cfg    RouteConfig
+
+	mu  sync.Mutex
+	rng *rand.Rand
 }
 
-// NewQueen builds a queen over a card store. Later slices add the trail
-// store, the ledger reader, the embedder, the journal, and the blackboard;
-// registration needs only the cards.
+// NewQueen builds a queen over a card store with the default routing config.
+// Registration needs only the cards; WithRouting wires the trail store and
+// sampler the assignment pipeline needs. Later slices add the ledger reader,
+// the journal, and the blackboard.
 func NewQueen(cards CardStore) *Queen {
-	return &Queen{cards: cards}
+	return &Queen{
+		cards: cards,
+		cfg:   DefaultRouteConfig(),
+		rng:   rand.New(rand.NewPCG(0x2085, 0xa71)),
+	}
+}
+
+// WithRouting wires the routing dependencies: the trail store the Thompson
+// draw reads and, optionally, a config and a seeded sampler for a deterministic
+// test. It returns the queen so a caller can chain it onto NewQueen.
+func (q *Queen) WithRouting(trails TrailStore, cfg RouteConfig, rng *rand.Rand) *Queen {
+	q.trails = trails
+	q.cfg = cfg
+	if rng != nil {
+		q.rng = rng
+	}
+	return q
 }
 
 // Register admits a card into the colony. It validates the card, refuses any
