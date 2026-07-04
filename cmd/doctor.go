@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -57,11 +58,14 @@ func runDoctor(c *cobra.Command, out io.Writer, fix, audit bool) error {
 	doc := doctor.New()
 	report := doc.Run(ctx)
 
+	var b strings.Builder
 	if fix {
-		applyFixes(out, ctx, doc, &report)
+		applyFixes(&b, ctx, doc, &report)
 	}
-
-	printReport(out, report)
+	printReport(&b, report)
+	if _, err := io.WriteString(out, b.String()); err != nil {
+		return coded(1, err)
+	}
 	return coded(doctorExit(report.Worst()), nil)
 }
 
@@ -69,42 +73,42 @@ func runDoctor(c *cobra.Command, out io.Writer, fix, audit bool) error {
 // printed report reflects the repaired state. A fix that fails is reported
 // and the finding stays, because doctor tells the truth about what it could
 // not repair (section 12.3).
-func applyFixes(out io.Writer, ctx *doctor.Context, doc *doctor.Doctor, report *doctor.Report) {
+func applyFixes(b *strings.Builder, ctx *doctor.Context, doc *doctor.Doctor, report *doctor.Report) {
 	fixed := 0
 	for _, f := range report.Findings {
 		if f.Status == doctor.StatusOK || f.Fix == nil {
 			continue
 		}
 		if err := f.Fix(ctx); err != nil {
-			fmt.Fprintf(out, "fix %q failed: %v\n", f.Check, err)
+			fmt.Fprintf(b, "fix %q failed: %v\n", f.Check, err)
 			continue
 		}
-		fmt.Fprintf(out, "fixed: %s\n", f.Check)
+		fmt.Fprintf(b, "fixed: %s\n", f.Check)
 		fixed++
 	}
 	if fixed > 0 {
-		fmt.Fprintln(out)
+		b.WriteByte('\n')
 		*report = doc.Run(ctx)
 	}
 }
 
 // printReport writes the findings in check order with a one-line summary,
 // human-voiced, no em-dashes (D24).
-func printReport(out io.Writer, report doctor.Report) {
+func printReport(b *strings.Builder, report doctor.Report) {
 	for _, f := range report.Findings {
-		fmt.Fprintf(out, "[%s] %s: %s\n", f.Status, f.Check, f.Reason)
+		fmt.Fprintf(b, "[%s] %s: %s\n", f.Status, f.Check, f.Reason)
 		if f.Status != doctor.StatusOK && f.Manual != "" {
-			fmt.Fprintf(out, "       fix: %s\n", f.Manual)
+			fmt.Fprintf(b, "       fix: %s\n", f.Manual)
 		}
 	}
-	fmt.Fprintln(out)
+	b.WriteByte('\n')
 	switch report.Worst() {
 	case doctor.StatusCritical:
-		fmt.Fprintln(out, "result: critical findings, fix these before you trust this workspace")
+		b.WriteString("result: critical findings, fix these before you trust this workspace\n")
 	case doctor.StatusWarn:
-		fmt.Fprintln(out, "result: warnings, review them when you can")
+		b.WriteString("result: warnings, review them when you can\n")
 	default:
-		fmt.Fprintln(out, "result: clean")
+		b.WriteString("result: clean\n")
 	}
 }
 
