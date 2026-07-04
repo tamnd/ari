@@ -67,6 +67,13 @@ type Automation struct {
 	Enabled bool `toml:"enabled"`
 }
 
+// LSP gates the language-server client. It is off by default because a
+// language server is a real process cost a user who does not want it
+// should not pay (doc 13, research/claude_code_opencode.md B.3).
+type LSP struct {
+	Enabled bool `toml:"enabled"`
+}
+
 // Config is the fully merged, resolved configuration for one run.
 type Config struct {
 	Providers  map[string]Provider `toml:"provider"`
@@ -76,6 +83,7 @@ type Config struct {
 	UI         UI                  `toml:"ui"`
 	Journal    Journal             `toml:"journal"`
 	Automation Automation          `toml:"automation"`
+	LSP        LSP                 `toml:"lsp"`
 
 	// Mode is the permission mode for the run; flags-only, not persisted.
 	Mode string `toml:"-"`
@@ -232,6 +240,10 @@ func (c *Config) mergeFile(source, path string) error {
 	if layer.Automation.Enabled {
 		c.Automation.Enabled = true
 		c.origins["automation.enabled"] = source
+	}
+	if layer.LSP.Enabled {
+		c.LSP.Enabled = true
+		c.origins["lsp.enabled"] = source
 	}
 	return nil
 }
