@@ -30,12 +30,15 @@ var (
 	parkWRecency    = 1.0
 	parkWImportance = 1.0
 	parkWRelevance  = 1.0
-	// recencyHalfLifeDays sets the per-day decay base for a normal row: one not
+	// RecencyHalfLifeDays sets the per-day decay base for a normal row: one not
 	// touched in this many days has half the recency of one touched today,
 	// before min-max normalization across the candidate set. A fast row decays
 	// far quicker and a pinned row does not decay at all, so the evaporation
-	// clock is the ttl_class, not one rate for every row (doc 07, D11).
-	recencyHalfLifeDays = 30.0
+	// clock is the ttl_class, not one rate for every row (doc 07, D11). It is
+	// exported because the colony's trail table decays its Beta counts on the
+	// same clock (doc 06 section 4.4, D13), so the two evaporation rates cannot
+	// skew: there is one number, not two that drift apart.
+	RecencyHalfLifeDays = 30.0
 	fastHalfLifeDays    = 1.0
 )
 
@@ -55,7 +58,7 @@ func halfLifeDays(ttlClass string) float64 {
 	case TTLPinned:
 		return math.Inf(1)
 	default:
-		return recencyHalfLifeDays
+		return RecencyHalfLifeDays
 	}
 }
 
