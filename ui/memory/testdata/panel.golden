@@ -1,0 +1,60 @@
+== dark ==
+
+
+
+
+
+
+
+    ╭──────────────────────────────────────────────────────────────────────╮
+    │ memory · worker/main                                                 │
+    │                                                                      │
+    │ pinned index                                                         │
+    │ - run make gen after schema.go (file:schema.go)                      │
+    │ - reuse the shared transport (file:transport.go)                     │
+    │                                                                      │
+    │ search                                                               │
+    │ › transport_                                                         │
+    │   [fresh] reuse the shared transport  One http.Transport for the wh… │
+    │ ▸ [stale] gen is generated  Never hand-edit gen/*.go; run make gen.  │
+    │                                                                      │
+    │ recent folds                                                         │
+    │ worker/main  +3 (1 refl), 2 archived, 5 seen                         │
+    ╰──────────────────────────────────────────────────────────────────────╯
+
+
+
+
+
+
+
+== light ==
+
+
+
+
+
+
+
+    ╭──────────────────────────────────────────────────────────────────────╮
+    │ memory · worker/main                                                 │
+    │                                                                      │
+    │ pinned index                                                         │
+    │ - run make gen after schema.go (file:schema.go)                      │
+    │ - reuse the shared transport (file:transport.go)                     │
+    │                                                                      │
+    │ search                                                               │
+    │ › transport_                                                         │
+    │   [fresh] reuse the shared transport  One http.Transport for the wh… │
+    │ ▸ [stale] gen is generated  Never hand-edit gen/*.go; run make gen.  │
+    │                                                                      │
+    │ recent folds                                                         │
+    │ worker/main  +3 (1 refl), 2 archived, 5 seen                         │
+    ╰──────────────────────────────────────────────────────────────────────╯
+
+
+
+
+
+
+

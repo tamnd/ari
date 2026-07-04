@@ -18,4 +18,4 @@ error                    -> bus.ErrorMsg               must-deliver
 turn.finished            -> bus.TurnFinishedMsg        must-deliver
 ant.spawned              -> (skipped)
 route.decided            -> (skipped)
-memory.folded            -> (skipped)
+memory.folded            -> bus.MemoryFoldedMsg        must-deliver

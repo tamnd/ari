@@ -26,6 +26,7 @@ const (
 	ThemePick
 	Cancel
 	FocusNext
+	MemoryPanel
 
 	// Editor scope.
 	Submit
@@ -58,6 +59,7 @@ const (
 var names = map[string]Action{
 	"quit": Quit, "help": HelpToggle, "palette": Palette,
 	"theme": ThemePick, "cancel": Cancel, "focus_next": FocusNext,
+	"memory": MemoryPanel,
 	"submit": Submit, "newline": Newline, "external_editor": ExternalEditor,
 	"scroll_up": ScrollUp, "scroll_down": ScrollDown,
 	"page_up": PageUp, "page_down": PageDown, "goto_bottom": GotoBottom,
@@ -95,7 +97,7 @@ func (s Scope) String() string {
 // scopeOf fixes which scope each action lives in.
 var scopeOf = map[Action]Scope{
 	Quit: Global, HelpToggle: Global, Palette: Global,
-	ThemePick: Global, Cancel: Global, FocusNext: Global,
+	ThemePick: Global, Cancel: Global, FocusNext: Global, MemoryPanel: Global,
 	Submit: Editor, Newline: Editor, ExternalEditor: Editor,
 	ScrollUp: Chat, ScrollDown: Chat, PageUp: Chat,
 	PageDown: Chat, GotoBottom: Chat,
@@ -116,12 +118,13 @@ func Default() Map {
 		return key.NewBinding(key.WithKeys(ks...), key.WithHelp(ks[0], help))
 	}
 	return Map{bindings: map[Action]key.Binding{
-		Quit:       b("quit", "ctrl+c"),
-		HelpToggle: b("help", "ctrl+g"),
-		Palette:    b("palette", "ctrl+p"),
-		ThemePick:  b("theme", "ctrl+t"),
-		Cancel:     b("cancel", "esc"),
-		FocusNext:  b("switch focus", "ctrl+w"),
+		Quit:        b("quit", "ctrl+c"),
+		HelpToggle:  b("help", "ctrl+g"),
+		Palette:     b("palette", "ctrl+p"),
+		ThemePick:   b("theme", "ctrl+t"),
+		Cancel:      b("cancel", "esc"),
+		FocusNext:   b("switch focus", "ctrl+w"),
+		MemoryPanel: b("memory", "ctrl+r"),
 
 		Submit:         b("send", "enter"),
 		Newline:        b("newline", "shift+enter", "ctrl+j"),
@@ -237,7 +240,7 @@ func (m Map) Help(scope Scope) []key.Binding {
 	case Diff:
 		actions = []Action{NextHunk, PrevHunk, ToggleDiff, DiffLeft, DiffRight, HelpToggle, Quit}
 	default:
-		actions = []Action{HelpToggle, Quit}
+		actions = []Action{MemoryPanel, HelpToggle, Quit}
 	}
 	out := make([]key.Binding, len(actions))
 	for i, a := range actions {

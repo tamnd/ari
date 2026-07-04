@@ -74,7 +74,7 @@ func runTUI(c *cobra.Command) error {
 
 	broker := bus.New[btea.Msg]()
 	m := ui.New(ui.Options{
-		Client:        colonyClient{c: colony},
+		Client:        colonyClient{c: colony, ns: ant.WorkerCard().State.Namespace},
 		Theme:         th,
 		Keys:          keys.Default(),
 		FirstRun:      firstRun(n),
@@ -84,6 +84,7 @@ func runTUI(c *cobra.Command) error {
 		Models:        tierModels(cfg),
 		ContextWindow: contextWindow,
 		Session:       session,
+		Namespace:     ant.WorkerCard().State.Namespace,
 		Drops:         broker.Dropped,
 		Onboarded:     onboarded(n),
 	})

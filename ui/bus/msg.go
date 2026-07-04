@@ -93,6 +93,11 @@ type (
 		event.PermissionResolved
 	}
 
+	MemoryFoldedMsg struct {
+		Meta
+		event.MemoryFolded
+	}
+
 	LedgerTurnMsg struct {
 		Meta
 		event.LedgerTurn
@@ -175,6 +180,10 @@ func ToMsg(e event.Event) (msg tea.Msg, lane Lane, ok bool) {
 		var v PermissionResolvedMsg
 		v.Meta = m
 		return build(e, &v.PermissionResolved, &v, MustDeliver)
+	case event.TypeMemoryFolded:
+		var v MemoryFoldedMsg
+		v.Meta = m
+		return build(e, &v.MemoryFolded, &v, MustDeliver)
 	case event.TypeLedgerTurn:
 		var v LedgerTurnMsg
 		v.Meta = m
