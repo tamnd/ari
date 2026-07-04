@@ -390,21 +390,21 @@ func TestTransitionsInIsolation(t *testing.T) {
 
 	t.Run("start", func(t *testing.T) {
 		st := &State{next: transStart}
-		h.loop.start(st)
+		h.loop.start(context.Background(), st)
 		if st.next != transAssemble {
 			t.Fatalf("next = %d", st.next)
 		}
 	})
 	t.Run("assemble to callModel", func(t *testing.T) {
 		st := &State{next: transAssemble}
-		h.loop.assemble(st)
+		h.loop.assemble(context.Background(), st)
 		if st.next != transCallModel {
 			t.Fatalf("next = %d", st.next)
 		}
 	})
 	t.Run("assemble at max turns", func(t *testing.T) {
 		st := &State{next: transAssemble, turn: 100}
-		h.loop.assemble(st)
+		h.loop.assemble(context.Background(), st)
 		if st.next != transTerminate || st.term != TermMaxTurns {
 			t.Fatalf("next = %d term = %s", st.next, st.term)
 		}
@@ -415,14 +415,14 @@ func TestTransitionsInIsolation(t *testing.T) {
 		st := &State{next: transAssemble, msgs: []provider.Message{{
 			Role: "user", Blocks: []provider.MsgBlock{{Kind: "text", Text: "long enough"}},
 		}}}
-		hh.loop.assemble(st)
+		hh.loop.assemble(context.Background(), st)
 		if st.next != transCompact {
 			t.Fatalf("next = %d, want compact", st.next)
 		}
 	})
 	t.Run("stopHooks", func(t *testing.T) {
 		st := &State{}
-		h.loop.stopHooks(st)
+		h.loop.stopHooks(context.Background(), st)
 		if st.term != TermCompleted || st.next != transTerminate {
 			t.Fatalf("term = %s next = %d", st.term, st.next)
 		}

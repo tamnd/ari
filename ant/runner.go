@@ -283,7 +283,13 @@ func (r *Runner) wake(ctx context.Context, t *core.TurnHandle) (*worker, error) 
 		Session:    string(t.Session),
 	})
 	if hr.Any() {
-		w.loop.Hooks = &hookBridge{runner: hr, session: string(t.Session), cwd: r.nest.Root}
+		bridge := &hookBridge{runner: hr, session: string(t.Session), cwd: r.nest.Root}
+		w.loop.Hooks = bridge
+		// PreToolUse steers the permission decision, so it feeds the pipeline
+		// rather than the loop's post-tool seam. The pipeline weighs its verdict
+		// in its own stage and the safety floor still vets a hook allow (doc 05
+		// section 3, D15).
+		pipe.Hook = bridge.preToolDecide
 	}
 	return w, nil
 }
@@ -297,16 +303,36 @@ type hookBridge struct {
 	cwd     string
 }
 
-// PreTool fires the pre-tool hooks before the permission decision. A block
-// carries the joined block message back to the model.
-func (b *hookBridge) PreTool(ctx context.Context, toolName string, input json.RawMessage) agent.HookResult {
+// preToolDecide is the pipeline's PreToolUse seam. It fires the pre-tool
+// hooks and maps their aggregated steer onto a permission.HookVerdict: a
+// block or an explicit deny becomes a deny, an allow may carry a narrowed
+// updatedInput, an ask forces a prompt, and any additionalContext rides
+// along. ok=false means no hook actually ran or none steered the call, so
+// the pipeline proceeds as if there were no hook (doc 05 section 3).
+func (b *hookBridge) preToolDecide(ctx context.Context, call permission.Call) (permission.HookVerdict, bool) {
 	out := b.runner.Fire(ctx, hook.PreToolUse, hook.Payload{
-		Tool:    toolName,
-		Input:   input,
+		Tool:    call.Tool.Name(),
+		Input:   call.Input,
 		Session: b.session,
 		Cwd:     b.cwd,
 	})
-	return agent.HookResult{Block: out.Block, Message: out.Message, Context: out.Context}
+	v := permission.HookVerdict{Context: out.Context}
+	if out.Permission != nil {
+		switch out.Permission.Behavior {
+		case "deny":
+			v.Behavior = permission.Deny
+		case "allow":
+			v.Behavior = permission.Allow
+		case "ask":
+			v.Behavior = permission.Ask
+		}
+		v.UpdatedInput = out.Permission.UpdatedInput
+		v.Message = out.Permission.Message
+	}
+	if v.Behavior == "" && v.Context == "" {
+		return permission.HookVerdict{}, false
+	}
+	return v, true
 }
 
 // PostTool fires the post-tool hooks after the tool returns. A failed call
@@ -321,6 +347,49 @@ func (b *hookBridge) PostTool(ctx context.Context, toolName string, input json.R
 		Input:   input,
 		Result:  result,
 		IsError: isErr,
+		Session: b.session,
+		Cwd:     b.cwd,
+	})
+	return agent.HookResult{Block: out.Block, Message: out.Message, Context: out.Context}
+}
+
+// PromptSubmit fires UserPromptSubmit as a new human prompt enters the run.
+// A block rejects the prompt and carries the reason; otherwise its context
+// is injected for the turn.
+func (b *hookBridge) PromptSubmit(ctx context.Context, prompt string) agent.HookResult {
+	out := b.runner.Fire(ctx, hook.UserPromptSubmit, hook.Payload{
+		Prompt:  prompt,
+		Session: b.session,
+		Cwd:     b.cwd,
+	})
+	return agent.HookResult{Block: out.Block, Message: out.Message, Context: out.Context}
+}
+
+// SessionStart fires at the start of a session and after a compaction. The
+// reason is "startup" or "compact"; a start hook only contributes context.
+func (b *hookBridge) SessionStart(ctx context.Context, reason string) agent.HookResult {
+	out := b.runner.Fire(ctx, hook.SessionStart, hook.Payload{
+		Reason:  reason,
+		Session: b.session,
+		Cwd:     b.cwd,
+	})
+	return agent.HookResult{Block: out.Block, Message: out.Message, Context: out.Context}
+}
+
+// SessionEnd fires when the run reaches its terminal reason. It cannot
+// change the outcome; it is for cleanup and notification side effects.
+func (b *hookBridge) SessionEnd(ctx context.Context, reason string) {
+	b.runner.Fire(ctx, hook.SessionEnd, hook.Payload{
+		Reason:  reason,
+		Session: b.session,
+		Cwd:     b.cwd,
+	})
+}
+
+// Stop fires when the model finishes with no tool calls. A block asks the
+// loop to keep working; the loop bounds how many times it honors a block.
+func (b *hookBridge) Stop(ctx context.Context) agent.HookResult {
+	out := b.runner.Fire(ctx, hook.Stop, hook.Payload{
 		Session: b.session,
 		Cwd:     b.cwd,
 	})
@@ -483,7 +552,7 @@ func (w *worker) decide(ctx context.Context, tl tool.Tool, input json.RawMessage
 	})
 	switch d.Behavior {
 	case permission.Allow:
-		return agent.Verdict{Allow: true, UpdatedInput: d.UpdatedInput}
+		return agent.Verdict{Allow: true, UpdatedInput: d.UpdatedInput, Context: d.HookContext}
 	case permission.Ask:
 		return agent.Verdict{
 			Allow:  false,

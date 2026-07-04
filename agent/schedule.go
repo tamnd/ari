@@ -225,6 +225,9 @@ func (l *Loop) runOne(ctx context.Context, i int, results []toolOutcome, serial 
 		return
 	}
 
+	// preContext holds any note a PreToolUse hook contributed through the
+	// permission decision; it is surfaced with the tool result below.
+	var preContext string
 	if l.Decide != nil {
 		v := l.Decide(ctx, t, args, c.ID)
 		if !v.Allow {
@@ -238,17 +241,7 @@ func (l *Loop) runOne(ctx context.Context, i int, results []toolOutcome, serial 
 		if v.UpdatedInput != nil {
 			args = v.UpdatedInput
 		}
-	}
-
-	if l.Hooks != nil {
-		if hr := l.Hooks.PreTool(ctx, c.Name, args); hr.Block {
-			msg := hr.Message
-			if msg == "" {
-				msg = "a hook blocked this call"
-			}
-			fail(msg + "; do not retry the same call, adjust or ask the user")
-			return
-		}
+		preContext = v.Context
 	}
 
 	var onProgress tool.ProgressFunc
@@ -286,6 +279,11 @@ func (l *Loop) runOne(ctx context.Context, i int, results []toolOutcome, serial 
 	r.spilled = ref.Path
 	r.effect = res.StateEffect
 	r.display = displayString(res, content)
+
+	if preContext != "" {
+		r.content += "\n\n" + preContext
+		content = r.content
+	}
 
 	if l.Hooks != nil {
 		hr := l.Hooks.PostTool(ctx, c.Name, args, content, false)

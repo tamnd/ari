@@ -80,6 +80,7 @@ const (
 	maxModelRetries           = 4      // transient retries before fallback
 	maxOutputRetries          = 3      // truncation recoveries before giving up
 	maxConsecutiveCompactFail = 3      // circuit breaker threshold
+	maxStopBlocks             = 3      // Stop-hook re-drives before the loop stops anyway
 	escalatedMaxOutput        = 64_000 // output cap after the first truncation
 
 	reservedOutputCap = 20_000 // output reservation ceiling
