@@ -2,9 +2,13 @@ package cmd
 
 import (
 	"context"
+	"encoding/json"
 
+	"github.com/tamnd/ari/agent"
 	"github.com/tamnd/ari/core"
+	"github.com/tamnd/ari/session"
 	"github.com/tamnd/ari/ui"
+	"github.com/tamnd/ari/ui/parts"
 )
 
 // colonyClient adapts the core facade to the ui.Client seam. The ui
@@ -67,6 +71,63 @@ func (a colonyClient) MemorySearch(ctx context.Context, query string) ([]ui.Memo
 
 func (a colonyClient) MemoryForget(ctx context.Context, session, id string) (bool, error) {
 	return a.c.ForgetMemory(ctx, core.SessionID(session), a.ns, id)
+}
+
+func (a colonyClient) Transcript(ctx context.Context, sess, ant string) ([]parts.Part, error) {
+	t, err := a.c.LoadSidechain(ctx, core.SessionID(sess), ant)
+	if err != nil {
+		return nil, err
+	}
+	return sidechainParts(t), nil
+}
+
+// sidechainParts reduces a stored sidechain to the render parts the drill-in
+// draws. This is the read-side mirror of the streaming projection the chat runs
+// live: an assistant entry unfolds into its reasoning, its text, and one part
+// per tool call, a tool entry becomes a result keyed to its call, and a user
+// entry is plain text. The reduction is lossy on purpose, since the drill-in is
+// a read-only glance at a worker's run, not a resumable session, so a tool
+// result carries its content as a string the per-tool renderer previews rather
+// than the typed display data the live path threads through.
+func sidechainParts(t session.Transcript) []parts.Part {
+	var out []parts.Part
+	for _, e := range t.Entries {
+		switch e.Type {
+		case session.EntryUser:
+			var b struct {
+				Text string `json:"text"`
+			}
+			_ = json.Unmarshal(e.Body, &b)
+			out = append(out, parts.Part{Kind: parts.KindText, Role: parts.RoleUser, Text: b.Text, Finished: e.Time})
+		case session.EntryAnt:
+			var b agent.AntBody
+			if json.Unmarshal(e.Body, &b) != nil {
+				continue
+			}
+			if b.Thinking != "" {
+				out = append(out, parts.Part{Kind: parts.KindReasoning, Role: parts.RoleAssistant, Text: b.Thinking, Finished: e.Time})
+			}
+			if b.Text != "" {
+				out = append(out, parts.Part{Kind: parts.KindText, Role: parts.RoleAssistant, Text: b.Text, Finished: e.Time})
+			}
+			for _, call := range b.Calls {
+				out = append(out, parts.Part{
+					Kind: parts.KindToolCall, Role: parts.RoleAssistant,
+					Tool: call.Name, Call: call.ID, Args: json.RawMessage(call.Input), Finished: e.Time,
+				})
+			}
+		case session.EntryTool:
+			var b agent.ToolBody
+			if json.Unmarshal(e.Body, &b) != nil {
+				continue
+			}
+			out = append(out, parts.Part{
+				Kind: parts.KindToolResult, Role: parts.RoleTool,
+				Tool: b.Tool, Call: b.Call, Result: b.Content, OK: !b.IsErr, Finished: e.Time,
+			})
+		}
+	}
+	return out
 }
 
 // memorySearchLimit caps how many hits the panel search asks for, the recall

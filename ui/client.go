@@ -1,6 +1,10 @@
 package ui
 
-import "context"
+import (
+	"context"
+
+	"github.com/tamnd/ari/ui/parts"
+)
 
 // Client is the slice of the core's session API the shell drives. It is
 // declared here, not imported, because the UI never imports a core
@@ -32,6 +36,12 @@ type Client interface {
 	// answer arrives as a permission request on the stream, so this blocks
 	// until the user resolves it. It reports whether a row was archived.
 	MemoryForget(ctx context.Context, session, id string) (bool, error)
+
+	// Transcript reads one worker ant's sidechain under a session as the
+	// render parts the colony drill-in draws. The ant key is the sidechain
+	// file the worker wrote to, not the forager lane; a worker that never
+	// spoke reads back an empty slice, not an error.
+	Transcript(ctx context.Context, session, ant string) ([]parts.Part, error)
 }
 
 // MemoryHit is one row a memory search returned, shaped for the panel.
