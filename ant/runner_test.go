@@ -253,6 +253,79 @@ func TestBindWiresColonyJournal(t *testing.T) {
 	}
 }
 
+// TestBindStandsUpColony proves the second seam of the M3 integration:
+// Bind constructs the queen, card store, blackboard, and worktrees over the
+// shared colony.db, and the starting population registers once the store is
+// migrated. Construction is checked right after Bind, before Start, because
+// it must not touch the database; the builtins register only after Start.
+func TestBindStandsUpColony(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("ARI_HOME", t.TempDir())
+
+	reg := provider.NewRegistry()
+	p := scripted.New()
+	reg.AddProvider(p)
+	if err := reg.AddTier("frontier", []provider.ChainLink{{Provider: p.Name(), Model: "fable-test"}}); err != nil {
+		t.Fatal(err)
+	}
+
+	r := NewRunner()
+	r.GitStatus = func(string) string { return "## main" }
+	ctx := context.Background()
+	c, err := core.Open(ctx, root,
+		core.WithRunner(r),
+		core.WithRegistry(reg),
+		core.WithConfig(&config.Config{Mode: "ask"}),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Bind(c)
+
+	// The kernel objects exist the moment Bind returns, before Start.
+	if r.queen == nil || r.cards == nil || r.board == nil || r.worktrees == nil {
+		t.Fatalf("Bind left a colony object nil: queen=%v cards=%v board=%v worktrees=%v",
+			r.queen != nil, r.cards != nil, r.board != nil, r.worktrees != nil)
+	}
+
+	if err := c.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := c.Close(); err != nil {
+			t.Errorf("close: %v", err)
+		}
+	})
+
+	// The starting population registers once the store is migrated, and a
+	// second call is a no-op through the sync.Once.
+	if err := r.ensureBuiltins(ctx); err != nil {
+		t.Fatalf("register builtins: %v", err)
+	}
+	if err := r.ensureBuiltins(ctx); err != nil {
+		t.Fatalf("second ensureBuiltins: %v", err)
+	}
+	rows, err := r.cards.List(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) == 0 {
+		t.Fatal("no builtin cards registered")
+	}
+	// The worker builtin the M0 path already wakes is one of them.
+	want := colony.WorkerCard().ID
+	found := false
+	for _, row := range rows {
+		if row.ID == want {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("worker card %q not among registered builtins", want)
+	}
+}
+
 // TestPromptPrefixStableAcrossTurns is the D14 cache-alignment test at
 // the session level: across ten turns of one session, the system blocks,
 // the tool definitions, and the block-two message serialize identically;

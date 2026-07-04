@@ -68,11 +68,22 @@ type Runner struct {
 	// The colony kernel objects live on the runner because ant is the one
 	// package that imports both core and colony (doc 09 section 6.5).
 	// journal lifts the kernel's plain-string records onto core's stream;
-	// governor is the first object wired to it, holding the wake and
-	// fan-out ceilings. The queen, blackboard, and worktrees join when
-	// dispatch routes through them.
-	journal  colony.JournalFunc
-	governor *colony.Governor
+	// governor holds the wake and fan-out ceilings; the queen routes a task
+	// to an ant over the shared card store; the blackboard is the task board
+	// workers claim from; worktrees isolate parallel edits. All are built at
+	// Bind and come online as dispatch routes through them.
+	journal   colony.JournalFunc
+	governor  *colony.Governor
+	queen     *colony.Queen
+	cards     colony.CardStore
+	board     colony.Blackboard
+	worktrees *colony.Worktrees
+
+	// builtins registers the starting population once, on the first turn
+	// after the colony.db migration has run. Construction at Bind is pure;
+	// the write waits for Start.
+	builtins   sync.Once
+	builtinErr error
 
 	mu      sync.Mutex
 	workers map[core.SessionID]*worker
@@ -134,7 +145,43 @@ func (r *Runner) Bind(c *core.Colony) {
 	// moment fan-out lands.
 	r.journal = colonyJournal(c)
 	r.governor = colony.NewGovernor(colony.DefaultCapConfig(), r.journal)
+	// The rest of the kernel objects share the one colony.db writer core
+	// hands back, so the router, the board, and the worktrees all read and
+	// write the single store. Construction only stashes handles and paths;
+	// nothing here touches the database, so it is safe before Start runs the
+	// migration. The embedder is the same one core built for memory, restated
+	// to colony's structural Embedder; a null embedder routes on class and
+	// signal prefilters alone.
+	db := c.Memory()
+	r.cards = colony.NewCardStore(db, r.nest.AntsDir(), core.BuildEmbedder(cfg))
+	r.queen = colony.NewQueen(r.cards)
+	r.board = colony.NewBlackboard(db, time.Now)
+	r.worktrees = colony.NewWorktrees(r.nest.Root, r.nest.ProjectStateDir(), gitRunner{})
 	r.bound = true
+}
+
+// ensureBuiltins registers the colony's starting population exactly once,
+// after Start has migrated colony.db. It is idempotent through Upsert, so a
+// second colony over the same nest re-registers the same cards without
+// duplication. The error is stashed so the first dispatch that needs the
+// queen surfaces it rather than a later, more confusing failure.
+func (r *Runner) ensureBuiltins(ctx context.Context) error {
+	r.builtins.Do(func() {
+		r.builtinErr = r.queen.RegisterBuiltins(ctx)
+	})
+	return r.builtinErr
+}
+
+// gitRunner is the shell seam the worktrees drive: one git invocation in a
+// directory, returning its combined output. It is a thin wrapper over exec
+// so a test can substitute a scripted runner without a real repository.
+type gitRunner struct{}
+
+func (gitRunner) Run(ctx context.Context, dir, name string, args ...string) (string, error) {
+	cmd := exec.CommandContext(ctx, name, args...)
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	return string(out), err
 }
 
 // colonyJournal builds the closure that lifts the colony kernel's
