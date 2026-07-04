@@ -50,6 +50,15 @@ func finding(id, task string) Finding {
 	}
 }
 
+// patch builds a valid Patch, the writer handoff reconcile composes.
+func patch(id, task string) Patch {
+	return Patch{
+		Header:  Header{ID: id, Kind: KindPatch, From: "worker-1", TaskID: task, SessionID: "s1"},
+		Diff:    "--- a/x.go\n+++ b/x.go\n",
+		BaseRef: "abc123",
+	}
+}
+
 // question builds a valid Question.
 func question(id, task string) Question {
 	return Question{
@@ -116,6 +125,37 @@ func TestPostSubtaskSetsOriginAndParent(t *testing.T) {
 	}
 	if childOrigin != string(OriginBlackboard) || childParent != "parent" {
 		t.Errorf("child row origin/parent = %s/%q, want blackboard/parent", childOrigin, childParent)
+	}
+}
+
+// TestPatchesReturnsWritersNotFindings proves the reconcile gather path reads
+// only the writer handoffs: a Patch and a Finding land under one task's partial
+// kind, and Patches returns the patch while Findings returns the finding, so a
+// survey's finding never leaks into a writer's reconcile and the reverse.
+func TestPatchesReturnsWritersNotFindings(t *testing.T) {
+	ctx := context.Background()
+	bb, _ := openBoard(t)
+	if _, err := bb.Post(ctx, Entry{SessionID: "s1", TaskID: "wp", Payload: patch("p1", "wp")}); err != nil {
+		t.Fatalf("post patch: %v", err)
+	}
+	if _, err := bb.Post(ctx, Entry{SessionID: "s1", TaskID: "wp", Payload: finding("f1", "wp")}); err != nil {
+		t.Fatalf("post finding: %v", err)
+	}
+
+	ps, err := bb.Patches(ctx, "wp")
+	if err != nil {
+		t.Fatalf("patches: %v", err)
+	}
+	if len(ps) != 1 || ps[0].ID != "p1" || ps[0].Kind != KindPatch {
+		t.Fatalf("patches = %+v, want the one patch p1", ps)
+	}
+
+	fs, err := bb.Findings(ctx, "wp")
+	if err != nil {
+		t.Fatalf("findings: %v", err)
+	}
+	if len(fs) != 1 || fs[0].ID != "f1" {
+		t.Fatalf("findings = %+v, want the one finding f1", fs)
 	}
 }
 

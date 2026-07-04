@@ -82,14 +82,14 @@ func (r *Runner) fanOut(ctx context.Context, t *core.TurnHandle, brief colony.Ta
 		Projected:      plan.Arg.Projected,
 		Remaining:      plan.Arg.Remaining,
 	})
-	findings, err := r.dispatch(ctx, t.Store, t.Session, brief, plan)
+	res, err := r.dispatch(ctx, t.Store, t.Session, brief, plan)
 	if err != nil {
 		r.logDebug(t, "fan-out dispatch: "+err.Error())
 	}
-	if len(findings) == 0 {
+	if len(res.Findings) == 0 {
 		return ""
 	}
-	return renderFindingsPreface(findings)
+	return renderFindingsPreface(res.Findings)
 }
 
 // renderFindingsPreface turns the surveys' findings into the block-three
