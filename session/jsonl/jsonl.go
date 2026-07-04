@@ -260,6 +260,52 @@ func (st *Store) Load(ctx context.Context, s session.ID) (session.Transcript, er
 	return t, nil
 }
 
+// LoadSidechain reads one ant's sub-transcript in file order. A sidechain is
+// append-only and linear, so there is no parent walk: the meta line opens the
+// file and every other line is one transcript entry in the order it happened. A
+// worker that never opened its file is not an error, it is an empty transcript,
+// which is what the colony drill-in shows for an ant that has not spoken yet.
+func (st *Store) LoadSidechain(ctx context.Context, s session.ID, ant string) (session.Transcript, error) {
+	if strings.ContainsAny(ant, "/\\") {
+		return session.Transcript{}, fmt.Errorf("ant name %q may not contain a path separator", ant)
+	}
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	f, err := os.Open(st.sidechainPath(s, ant))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return session.Transcript{}, nil
+		}
+		return session.Transcript{}, fmt.Errorf("sidechain %s/%s: %w", s, ant, err)
+	}
+	defer func() { _ = f.Close() }()
+
+	var t session.Transcript
+	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
+	for sc.Scan() {
+		line := sc.Bytes()
+		if len(line) == 0 {
+			continue
+		}
+		var e session.Entry
+		if err := json.Unmarshal(line, &e); err != nil {
+			return session.Transcript{}, fmt.Errorf("sidechain %s/%s: bad line: %w", s, ant, err)
+		}
+		if e.Type == session.EntryMeta {
+			if err := json.Unmarshal(e.Body, &t.Meta); err != nil {
+				return session.Transcript{}, fmt.Errorf("sidechain %s/%s: bad meta: %w", s, ant, err)
+			}
+			continue
+		}
+		t.Entries = append(t.Entries, e)
+	}
+	if err := sc.Err(); err != nil {
+		return session.Transcript{}, err
+	}
+	return t, nil
+}
+
 // List returns session summaries, newest first.
 func (st *Store) List(ctx context.Context) ([]session.Summary, error) {
 	st.mu.Lock()

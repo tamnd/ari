@@ -104,6 +104,13 @@ type Store interface {
 	// parallel tool results the single-parent walk missed.
 	Load(ctx context.Context, s ID) (Transcript, error)
 
+	// LoadSidechain reads one ant's sub-transcript under a session in file
+	// order, so the foreground can drill into a worker's run without touching
+	// the main resume (doc 09 section 12.2). A sidechain is a linear log, not a
+	// forked chain, so it needs no parent walk. A worker that never opened its
+	// file yields an empty transcript, not an error.
+	LoadSidechain(ctx context.Context, s ID, ant string) (Transcript, error)
+
 	// List returns session summaries for the project, newest first.
 	List(ctx context.Context) ([]Summary, error)
 }
