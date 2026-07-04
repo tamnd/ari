@@ -54,7 +54,7 @@ func TestFreshDatabaseMigratesToHead(t *testing.T) {
 	for _, name := range []string{
 		"memories", "memory_anchor", "memory_evidence", "memories_fts",
 		"memory_candidates", "candidate_anchor", "candidate_evidence",
-		"cards", "schema_migrations",
+		"cards", "blackboard", "schema_migrations",
 	} {
 		if !tableExists(t, s, name) {
 			t.Errorf("table %q missing after migrate", name)
@@ -64,8 +64,8 @@ func TestFreshDatabaseMigratesToHead(t *testing.T) {
 	if err != nil {
 		t.Fatalf("schemaVersion: %v", err)
 	}
-	if v != 4 {
-		t.Fatalf("head version = %d, want 4", v)
+	if v != 5 {
+		t.Fatalf("head version = %d, want 5", v)
 	}
 }
 
@@ -83,8 +83,8 @@ func TestMigrateIsIdempotent(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("count migrations: %v", err)
 	}
-	if count != 4 {
-		t.Fatalf("schema_migrations rows = %d, want 4 (no re-apply)", count)
+	if count != 5 {
+		t.Fatalf("schema_migrations rows = %d, want 5 (no re-apply)", count)
 	}
 }
 
@@ -114,7 +114,7 @@ func TestMigrateFromVersionZeroUpgradesInOrder(t *testing.T) {
 		t.Fatal("migrate from zero did not build both migrations")
 	}
 	v, _ := s.schemaVersion(ctx)
-	if v != 4 {
-		t.Fatalf("version after upgrade = %d, want 4", v)
+	if v != 5 {
+		t.Fatalf("version after upgrade = %d, want 5", v)
 	}
 }
