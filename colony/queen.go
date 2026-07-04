@@ -21,6 +21,7 @@ import (
 type Queen struct {
 	cards  CardStore
 	trails TrailStore
+	memory MemoryCluster
 	cfg    RouteConfig
 
 	mu  sync.Mutex
@@ -48,6 +49,15 @@ func (q *Queen) WithRouting(trails TrailStore, cfg RouteConfig, rng *rand.Rand) 
 	if rng != nil {
 		q.rng = rng
 	}
+	return q
+}
+
+// WithMemory wires the seed source the queen breeds from. Without it the queen
+// never spawns: a gap in the colony stretches an existing generalist rather
+// than birthing a blank ant, because a spawn with nothing to seed from is the
+// cold, uninformed newborn D13's seeding rule exists to avoid.
+func (q *Queen) WithMemory(memory MemoryCluster) *Queen {
+	q.memory = memory
 	return q
 }
 
