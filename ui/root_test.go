@@ -149,6 +149,12 @@ func kp(s string) btea.KeyPressMsg {
 		return btea.KeyPressMsg{Code: 'e', Mod: btea.ModCtrl}
 	case "ctrl+l":
 		return btea.KeyPressMsg{Code: 'l', Mod: btea.ModCtrl}
+	case "up":
+		return btea.KeyPressMsg{Code: btea.KeyUp}
+	case "down":
+		return btea.KeyPressMsg{Code: btea.KeyDown}
+	case "backspace":
+		return btea.KeyPressMsg{Code: btea.KeyBackspace}
 	}
 	return btea.KeyPressMsg{Code: rune(s[0]), Text: s}
 }
@@ -396,7 +402,7 @@ func TestViewGolden(t *testing.T) {
 func workerWoke(ant, task string) bus.WorkerWokeMsg {
 	var m bus.WorkerWokeMsg
 	m.Meta = bus.Meta{Session: "s1"}
-	m.WorkerWoke = event.WorkerWoke{Ant: ant, Task: task, Tier: "cheap"}
+	m.WorkerWoke = event.WorkerWoke{Ant: ant, Task: task, Tier: "cheap", File: "surveyor." + task}
 	return m
 }
 
@@ -429,6 +435,41 @@ func TestColonyPanelTogglesAndShowsLiveAnts(t *testing.T) {
 	}
 	if h.m.colony.open {
 		t.Fatal("closing the panel left the open flag set")
+	}
+}
+
+// TestColonyDrillInFromRoot drives the drill-in through the whole root: a
+// worker wakes carrying its sidechain locator, the panel opens, the cursor
+// walks to the second lane, enter drills in and the root runs the fetch it
+// returns, and the frame shows that lane's transcript read-only. This is the
+// path a user takes, keys in and a live sidechain out.
+func TestColonyDrillInFromRoot(t *testing.T) {
+	h := newHarness(t, Options{})
+	h.client.scripts = map[string][]parts.Part{
+		"surveyor.sub-b": {{Kind: parts.KindText, Role: parts.RoleAssistant, Text: "found the leak in cache.go"}},
+	}
+	typeText(h, "hi")
+	h.press(kp("enter")) // into chat on session s1
+
+	h.send(workerWoke("forager-0", "sub-a"))
+	h.send(workerWoke("forager-1", "sub-b"))
+
+	h.press(kp("ctrl+l"))
+	h.press(kp("down"))  // cursor to forager-1
+	h.press(kp("enter")) // drill in; the root runs the fetch this returns
+
+	out := renderPlain(h.m, 120, 40)
+	if !strings.Contains(out, "found the leak in cache.go") {
+		t.Errorf("drill-in did not show the worker transcript:\n%s", out)
+	}
+	if !strings.Contains(out, "read-only") {
+		t.Errorf("drill-in missing the read-only marker:\n%s", out)
+	}
+
+	h.press(kp("backspace"))
+	back := renderPlain(h.m, 120, 40)
+	if !strings.Contains(back, "forager-0") || !strings.Contains(back, "forager-1") {
+		t.Errorf("backspace did not return to the list:\n%s", back)
 	}
 }
 

@@ -77,8 +77,25 @@ type Ant struct {
 // shows that ant's sidechain Transcript instead of the list.
 type State struct {
 	Ants       []Ant
+	Selected   string       // ant id the list cursor sits on, "" for none
 	Focused    string       // ant id whose transcript is open, "" for the list
 	Transcript []parts.Part // the focused ant's sidechain, rendered read-only
+}
+
+// Order sorts a copy of the ants the way the list draws them: a blocked ant
+// floats to the top because it wants attention, then the awake ants above the
+// dormant ones, and the finished ants settle to the bottom, ties broken by
+// name. The controller shares this so its cursor walks the ants in the same
+// order the user sees, never a hidden insertion order.
+func Order(ants []Ant) []Ant {
+	out := slices.Clone(ants)
+	slices.SortStableFunc(out, func(a, b Ant) int {
+		if r := a.Status.rank() - b.Status.rank(); r != 0 {
+			return r
+		}
+		return strings.Compare(a.Name, b.Name)
+	})
+	return out
 }
 
 // View renders State into its area.
@@ -124,13 +141,7 @@ func (v *View) renderList(width, height int) []string {
 	th := v.th.S
 	fit := func(l string) string { return ansi.Truncate(l, width, "…") }
 
-	ants := slices.Clone(v.st.Ants)
-	slices.SortStableFunc(ants, func(a, b Ant) int {
-		if r := a.Status.rank() - b.Status.rank(); r != 0 {
-			return r
-		}
-		return strings.Compare(a.Name, b.Name)
-	})
+	ants := Order(v.st.Ants)
 
 	out := []string{fit(th.Subtle.Render("colony"))}
 	for _, a := range ants {
@@ -139,7 +150,11 @@ func (v *View) renderList(width, height int) []string {
 		status := v.statusStyle(a.Status).Render(a.Status.label())
 		tokens := th.Muted.Render(fmt.Sprintf("%d tok", a.Tokens))
 		right := status + "  " + tokens
-		name := th.Base.Render(a.Name)
+		nameStyle := th.Base
+		if a.ID == v.st.Selected {
+			nameStyle = th.Selected
+		}
+		name := nameStyle.Render(a.Name)
 		pad := max(width-2-ansi.StringWidth(a.Name)-ansi.StringWidth(status)-ansi.StringWidth(tokens)-2, 1)
 		out = append(out, fit(glyph+" "+name+fmt.Sprintf("%*s", pad, "")+right))
 		if a.Status == Blocked && a.Question != "" {

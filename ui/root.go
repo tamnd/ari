@@ -103,7 +103,7 @@ func New(o Options) *Model {
 	m.status = NewStatus(o.Theme, o.Keys, o.Now)
 	m.perms = NewPerm(o.Client, o.Theme)
 	m.memory = NewMemory(o.Client, o.Theme, o.Namespace)
-	m.colony = NewColony(o.Theme)
+	m.colony = NewColony(o.Client, o.Theme)
 	if o.Session != "" {
 		m.session = o.Session
 		m.state = StateChat
@@ -177,6 +177,12 @@ func (m *Model) Update(msg btea.Msg) (btea.Model, btea.Cmd) {
 			return m, m.status.Notify("error", "forget: "+v.err.Error())
 		}
 		return m, m.memory.OnForgot(v)
+	case colonyTranscript:
+		if v.err != nil {
+			return m, m.status.Notify("error", "sidechain: "+v.err.Error())
+		}
+		m.colony.OnTranscript(v)
+		return m, nil
 	case bus.PermissionRequestedMsg:
 		m.perms.Request(v, m.overlay, m.now())
 		return m, nil
