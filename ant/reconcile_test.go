@@ -157,7 +157,7 @@ func TestDispatchReconcilesWriterPatches(t *testing.T) {
 		writerSubtask("w-b", "echo bravo > b.txt"),
 	}}
 
-	res, err := r.dispatch(ctx, c.Store(), sid, parent, plan)
+	res, err := r.dispatch(ctx, c.Store(), sid, "t1", parent, plan)
 	if err != nil {
 		t.Fatalf("dispatch: %v", err)
 	}
@@ -208,7 +208,7 @@ func TestDispatchReconcileReportsConflict(t *testing.T) {
 		writerSubtask("w-b", "echo bravo > base.txt"),
 	}}
 
-	res, err := r.dispatch(ctx, c.Store(), sid, parent, plan)
+	res, err := r.dispatch(ctx, c.Store(), sid, "t1", parent, plan)
 	if err != nil {
 		t.Fatalf("dispatch: %v", err)
 	}
