@@ -1,5 +1,34 @@
 # Changelog
 
+## v0.3
+
+The headline is colony memory: the ant now remembers across sessions. Each
+project gets its own database, kept outside the repo, that the ant fills as it
+works and reads back the next time you open the same codebase. Where an `ARI.md`
+house rule is memory you write, this is memory the ant earns.
+
+Memory is deliberately hard to poison. A proposal is queued, not stored; only
+consolidation, the fold that runs between turns, writes a live memory after
+weighing it against what is already known. Merging a cluster takes the strongest
+single note's importance, never the sum, so saying the same thing ten times buys
+no rank. And the load-bearing memories render into a pinned index the ant carries
+at the head of every prompt, rebuilt only at a fold boundary, so the prompt prefix
+stays stable and the model's cache keeps paying off.
+
+- Three memory tools: `remember` proposes a memory for the next fold, `recall`
+  runs a hybrid full-text and vector search ranked by relevance, recency, and
+  importance, and `forget` archives a row without ever deleting it.
+- `ari memory export` renders a namespace to markdown you can edit, and `ari
+  memory import` reads it back: an edited body updates the row and marks it
+  read-only, a new block becomes a memory, a deleted block archives its row.
+- Press `ctrl+r` in the TUI for the memory panel: the live pinned index, a
+  search over archival memory, and a tail of the fold log so you watch
+  consolidation happen.
+- `ari doctor` gained a colony memory check: the database is outside the repo, at
+  the head schema version, and its write-ahead log is healthy. A `colony.db` in a
+  committable path is flagged critical, because a memory file in a commit is a
+  memory file in every clone.
+
 ## v0.2
 
 The headline is the self-correcting edit loop. Turn the language server on and
