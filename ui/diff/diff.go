@@ -78,6 +78,15 @@ func cacheKey(text string, width int, themeName string, mode Mode) uint64 {
 }
 
 func render(diffText string, width int, th theme.Theme, mode Mode) []string {
+	lines, _ := layout(diffText, width, th, mode)
+	return lines
+}
+
+// layout renders the diff and also returns the output-line index of each
+// hunk header, in order, so a stateful viewer can jump between hunks
+// without re-parsing. The pure Render caches only the lines; the viewer
+// asks for the anchors.
+func layout(diffText string, width int, th theme.Theme, mode Mode) (lines []string, hunks []int) {
 	if width < 8 {
 		width = 8
 	}
@@ -221,13 +230,15 @@ func changedSpans(old, new string) (of, ot, nf, nt int) {
 }
 
 // renderUnified stacks the diff with a two-column line-number gutter.
-func renderUnified(doc document, width int, th theme.Theme) []string {
+func renderUnified(doc document, width int, th theme.Theme) ([]string, []int) {
 	st := th.S.Diff
 	lex := lexerFor(doc.path)
 	var out []string
+	var hunks []int
 	for _, l := range doc.lines {
 		switch l.kind {
 		case kindHunk:
+			hunks = append(hunks, len(out))
 			out = append(out, ansi.Truncate(st.Header.Render(l.text), width, "…"))
 		case kindMeta:
 			out = append(out, ansi.Truncate(st.LineNo.Render(l.text), width, "…"))
@@ -242,12 +253,12 @@ func renderUnified(doc document, width int, th theme.Theme) []string {
 			out = append(out, compose(g, l, lex, st.Context, st.Context, th, width))
 		}
 	}
-	return out
+	return out, hunks
 }
 
 // renderSplit puts old on the left and new on the right. Paired del and
 // add lines share a row; unpaired ones face a blank half.
-func renderSplit(doc document, width int, th theme.Theme) []string {
+func renderSplit(doc document, width int, th theme.Theme) ([]string, []int) {
 	st := th.S.Diff
 	lex := lexerFor(doc.path)
 	half := (width - 1) / 2
@@ -264,12 +275,14 @@ func renderSplit(doc document, width int, th theme.Theme) []string {
 	}
 
 	var out []string
+	var hunks []int
 	lines := doc.lines
 	i := 0
 	for i < len(lines) {
 		l := lines[i]
 		switch l.kind {
 		case kindHunk:
+			hunks = append(hunks, len(out))
 			out = append(out, ansi.Truncate(st.Header.Render(l.text), width, "…"))
 			i++
 		case kindMeta:
@@ -307,7 +320,7 @@ func renderSplit(doc document, width int, th theme.Theme) []string {
 			}
 		}
 	}
-	return out
+	return out, hunks
 }
 
 // compose builds one styled diff line: gutter, then the code tokenized

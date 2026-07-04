@@ -44,6 +44,13 @@ const (
 	NextChoice
 	PrevChoice
 
+	// Diff scope: the edit-result and approval diff view.
+	NextHunk
+	PrevHunk
+	ToggleDiff
+	DiffLeft
+	DiffRight
+
 	actionCount
 )
 
@@ -55,6 +62,8 @@ var names = map[string]Action{
 	"scroll_up": ScrollUp, "scroll_down": ScrollDown,
 	"page_up": PageUp, "page_down": PageDown, "goto_bottom": GotoBottom,
 	"confirm": Confirm, "next_choice": NextChoice, "prev_choice": PrevChoice,
+	"next_hunk": NextHunk, "prev_hunk": PrevHunk, "toggle_diff": ToggleDiff,
+	"diff_left": DiffLeft, "diff_right": DiffRight,
 }
 
 func (a Action) String() string {
@@ -76,10 +85,11 @@ const (
 	Editor
 	Chat
 	Dialog
+	Diff
 )
 
 func (s Scope) String() string {
-	return [...]string{"global", "editor", "chat", "dialog"}[s]
+	return [...]string{"global", "editor", "chat", "dialog", "diff"}[s]
 }
 
 // scopeOf fixes which scope each action lives in.
@@ -90,6 +100,8 @@ var scopeOf = map[Action]Scope{
 	ScrollUp: Chat, ScrollDown: Chat, PageUp: Chat,
 	PageDown: Chat, GotoBottom: Chat,
 	Confirm: Dialog, NextChoice: Dialog, PrevChoice: Dialog,
+	NextHunk: Diff, PrevHunk: Diff, ToggleDiff: Diff,
+	DiffLeft: Diff, DiffRight: Diff,
 }
 
 // Map is the full live keymap. The zero value is unusable; start from
@@ -124,6 +136,12 @@ func Default() Map {
 		Confirm:    b("confirm", "enter"),
 		NextChoice: b("next", "tab", "right"),
 		PrevChoice: b("previous", "shift+tab", "left"),
+
+		NextHunk:   b("next hunk", "]h"),
+		PrevHunk:   b("prev hunk", "[h"),
+		ToggleDiff: b("unified/split", "v"),
+		DiffLeft:   b("scroll left", "h"),
+		DiffRight:  b("scroll right", "l"),
 	}}
 }
 
@@ -216,6 +234,8 @@ func (m Map) Help(scope Scope) []key.Binding {
 		actions = []Action{Submit, Newline, ExternalEditor, FocusNext, HelpToggle, Quit}
 	case Chat:
 		actions = []Action{ScrollUp, ScrollDown, GotoBottom, FocusNext, HelpToggle, Quit}
+	case Diff:
+		actions = []Action{NextHunk, PrevHunk, ToggleDiff, DiffLeft, DiffRight, HelpToggle, Quit}
 	default:
 		actions = []Action{HelpToggle, Quit}
 	}
