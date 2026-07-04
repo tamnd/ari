@@ -12,6 +12,7 @@ import (
 	"github.com/tamnd/ari/event"
 	"github.com/tamnd/ari/journal"
 	"github.com/tamnd/ari/kernel/ledger"
+	memsqlite "github.com/tamnd/ari/memory/sqlite"
 	"github.com/tamnd/ari/nest"
 	"github.com/tamnd/ari/provider"
 	"github.com/tamnd/ari/session"
@@ -27,6 +28,7 @@ type Colony struct {
 	config   *config.Config
 	bus      *bus.Bus
 	journal  *journal.Journal
+	memory   *memsqlite.Store
 	store    session.Store
 	runner   TurnRunner
 	flags    config.FlagOverrides
@@ -168,6 +170,11 @@ func Open(ctx context.Context, dir string, opts ...Option) (*Colony, error) {
 		return nil, Wrap(ErrNest, err, "opening the journal")
 	}
 	c.journal = j
+	mem, err := memsqlite.Open(n.ColonyDB())
+	if err != nil {
+		return nil, Wrap(ErrNest, err, "opening colony.db")
+	}
+	c.memory = mem
 	if c.registry == nil {
 		reg, err := BuildRegistry(c.config)
 		if err != nil {
@@ -208,6 +215,9 @@ func (c *Colony) Start(ctx context.Context) error {
 	if err := c.journal.Start(ctx); err != nil {
 		return Wrap(ErrNest, err, "starting the journal")
 	}
+	if err := c.memory.Start(ctx); err != nil {
+		return Wrap(ErrNest, err, "starting the memory writer")
+	}
 	c.started = true
 	return nil
 }
@@ -225,7 +235,14 @@ func (c *Colony) Close() error {
 		if closer, ok := c.runner.(io.Closer); ok {
 			_ = closer.Close()
 		}
+		// The memory writer drains after the turns that feed it have stopped,
+		// so a fold in flight finishes before the file closes, and before the
+		// journal so a memory.folded event still has somewhere to land.
+		memErr := c.memory.Close()
 		c.closeErr = c.journal.Close()
+		if c.closeErr == nil {
+			c.closeErr = memErr
+		}
 		c.pumps.Wait()
 	})
 	return c.closeErr
