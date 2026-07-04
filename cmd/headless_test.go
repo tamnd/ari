@@ -14,6 +14,7 @@ import (
 	"github.com/tamnd/ari/config"
 	"github.com/tamnd/ari/core"
 	"github.com/tamnd/ari/event"
+	"github.com/tamnd/ari/nest"
 	"github.com/tamnd/ari/provider"
 	"github.com/tamnd/ari/provider/scripted"
 )
@@ -366,6 +367,67 @@ func TestHeadlessMatchesTUIStream(t *testing.T) {
 
 	if got, want := fmt.Sprint(headTypes), fmt.Sprint(tuiTypes); got != want {
 		t.Errorf("streams differ modulo timing\nheadless: %v\ntui:      %v", headTypes, tuiTypes)
+	}
+}
+
+// TestHeadlessJSONMatchesJournalBytes is the slice's byte-identical DoD
+// (plan 02 slice 1, doc 01 section 8.3): the --json stream is the same
+// serializer the journal writes, so every journaled event's line on
+// stdout is byte-for-byte the line on disk. The stream leads with a
+// synthetic hello (Seq 0, never journaled), so the on-disk log lines up
+// with the stream past that first line. A regression in either serializer
+// shows up here as one diff.
+func TestHeadlessJSONMatchesJournalBytes(t *testing.T) {
+	root := t.TempDir()
+	writeMainGo(t, root)
+	// scriptedOpts points ARI_HOME at a temp global nest, so the journal
+	// resolves to a path this test can read back deterministically.
+	opts := scriptedOpts(t, readSummarize(root), "full-auto")
+
+	var out bytes.Buffer
+	err := oneShot(context.Background(), shot{
+		Dir:    root,
+		Prompt: "read main.go and summarize it",
+		JSON:   true,
+		Out:    &out,
+		Opts:   opts,
+	})
+	if err != nil {
+		t.Fatalf("oneShot: %v", err)
+	}
+
+	// The stream: hello first, then one journaled event per line.
+	streamLines := strings.Split(strings.TrimSuffix(out.String(), "\n"), "\n")
+	if len(streamLines) < 2 {
+		t.Fatalf("stream has %d lines, want a hello plus journaled events", len(streamLines))
+	}
+	var hello event.Event
+	if uerr := json.Unmarshal([]byte(streamLines[0]), &hello); uerr != nil || hello.Type != event.TypeHello {
+		t.Fatalf("first stream line is not a hello: %q (%v)", streamLines[0], uerr)
+	}
+	streamJournaled := streamLines[1:]
+
+	// The disk: the same run's journal, read raw so the comparison is on
+	// bytes, not on re-encoded structs.
+	n, err := nest.Resolve(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(filepath.Join(n.JournalDir(), "events-00001.jsonl"))
+	if err != nil {
+		t.Fatalf("reading the journal: %v", err)
+	}
+	journalLines := strings.Split(strings.TrimSuffix(string(raw), "\n"), "\n")
+
+	if len(streamJournaled) != len(journalLines) {
+		t.Fatalf("stream carried %d journaled events, journal has %d lines",
+			len(streamJournaled), len(journalLines))
+	}
+	for i := range journalLines {
+		if streamJournaled[i] != journalLines[i] {
+			t.Errorf("event %d differs between stream and journal\nstream:  %s\njournal: %s",
+				i, streamJournaled[i], journalLines[i])
+		}
 	}
 }
 
