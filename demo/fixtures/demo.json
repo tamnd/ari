@@ -1,0 +1,154 @@
+{
+  "name": "hello-ari-rename",
+  "prompt": "Rename Greeting to Greet across the package and update the test, then run go test.",
+  "responses": [
+    {
+      "text": "Finding every place Greeting is used before I touch anything.",
+      "calls": [
+        {
+          "ID": "c-find",
+          "Name": "find",
+          "Input": "{\"content\":\"Greeting\"}"
+        }
+      ],
+      "usage": {
+        "Input": 60,
+        "Output": 14,
+        "CacheRead": 0,
+        "CacheWrite": 0,
+        "Estimated": false
+      },
+      "stop": "tool_use"
+    },
+    {
+      "text": "Reading the three files so I can edit them safely.",
+      "calls": [
+        {
+          "ID": "c-read-greet",
+          "Name": "read",
+          "Input": "{\"file_path\":\"%ROOT%/greet/greet.go\"}"
+        },
+        {
+          "ID": "c-read-test",
+          "Name": "read",
+          "Input": "{\"file_path\":\"%ROOT%/greet/greet_test.go\"}"
+        },
+        {
+          "ID": "c-read-main",
+          "Name": "read",
+          "Input": "{\"file_path\":\"%ROOT%/main.go\"}"
+        }
+      ],
+      "usage": {
+        "Input": 90,
+        "Output": 22,
+        "CacheRead": 0,
+        "CacheWrite": 0,
+        "Estimated": false
+      },
+      "stop": "tool_use"
+    },
+    {
+      "text": "Renaming the function.",
+      "calls": [
+        {
+          "ID": "c-edit-bad",
+          "Name": "edit",
+          "Input": "{\"file_path\":\"%ROOT%/greet/greet.go\",\"old_string\":\"Greeting\",\"new_string\":\"Greet\"}"
+        }
+      ],
+      "usage": {
+        "Input": 110,
+        "Output": 18,
+        "CacheRead": 0,
+        "CacheWrite": 0,
+        "Estimated": false
+      },
+      "stop": "tool_use"
+    },
+    {
+      "text": "Greeting appears twice, so I will match the comment and the signature together to make it unique.",
+      "calls": [
+        {
+          "ID": "c-edit-greet",
+          "Name": "edit",
+          "Input": "{\"file_path\":\"%ROOT%/greet/greet.go\",\"old_string\":\"// Greeting returns a friendly hello for name.\\nfunc Greeting(name string) string\",\"new_string\":\"// Greet returns a friendly hello for name.\\nfunc Greet(name string) string\"}"
+        }
+      ],
+      "usage": {
+        "Input": 130,
+        "Output": 30,
+        "CacheRead": 0,
+        "CacheWrite": 0,
+        "Estimated": false
+      },
+      "stop": "tool_use"
+    },
+    {
+      "text": "Updating the test to call the renamed function.",
+      "calls": [
+        {
+          "ID": "c-edit-test",
+          "Name": "edit",
+          "Input": "{\"file_path\":\"%ROOT%/greet/greet_test.go\",\"old_string\":\"Greeting(\\\"ari\\\")\",\"new_string\":\"Greet(\\\"ari\\\")\"}"
+        }
+      ],
+      "usage": {
+        "Input": 145,
+        "Output": 20,
+        "CacheRead": 0,
+        "CacheWrite": 0,
+        "Estimated": false
+      },
+      "stop": "tool_use"
+    },
+    {
+      "text": "Updating the caller in main.",
+      "calls": [
+        {
+          "ID": "c-edit-main",
+          "Name": "edit",
+          "Input": "{\"file_path\":\"%ROOT%/main.go\",\"old_string\":\"greet.Greeting(\\\"world\\\")\",\"new_string\":\"greet.Greet(\\\"world\\\")\"}"
+        }
+      ],
+      "usage": {
+        "Input": 155,
+        "Output": 20,
+        "CacheRead": 0,
+        "CacheWrite": 0,
+        "Estimated": false
+      },
+      "stop": "tool_use"
+    },
+    {
+      "text": "Running the tests to confirm the rename compiles and passes.",
+      "calls": [
+        {
+          "ID": "c-sh",
+          "Name": "sh",
+          "Input": "{\"command\":\"go test ./...\",\"description\":\"Run the package tests\"}"
+        }
+      ],
+      "usage": {
+        "Input": 170,
+        "Output": 16,
+        "CacheRead": 0,
+        "CacheWrite": 0,
+        "Estimated": false
+      },
+      "stop": "tool_use"
+    },
+    {
+      "text": "Done. Greeting is now Greet across the package and go test passes.",
+      "usage": {
+        "Input": 190,
+        "Output": 24,
+        "CacheRead": 0,
+        "CacheWrite": 0,
+        "Estimated": false
+      },
+      "stop": "end_turn"
+    }
+  ],
+  "want": null
+}

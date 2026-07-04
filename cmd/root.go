@@ -32,8 +32,10 @@ permission mode yourself.`,
 	},
 }
 
-// Execute runs the command tree. main is the only caller.
-func Execute() error {
+// Execute runs the command tree and returns the process exit code. main is
+// the only caller. The code is the error taxonomy for most commands and
+// doctor's own 0/1/2/3 contract for doctor, both resolved by exitCode.
+func Execute() int {
 	rootCmd.PersistentFlags().StringP("config", "c", "", "path to a config file (overrides discovery)")
 	rootCmd.Flags().StringP("prompt", "p", "", "run one headless turn with this prompt and exit")
 	rootCmd.Flags().Bool("json", false, "with -p, stream raw events as JSON lines to stdout")
@@ -41,10 +43,10 @@ func Execute() error {
 	rootCmd.Flags().Bool("resume", false, "resume the most recent session in this project")
 
 	err := fang.Execute(context.Background(), rootCmd, fang.WithVersion(version.Resolve()))
-	if err != nil {
+	if err != nil && !silent(err) {
 		fmt.Fprintln(os.Stderr, err)
 	}
-	return err
+	return exitCode(err)
 }
 
 func notYet(what, milestone string) error {
