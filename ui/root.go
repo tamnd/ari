@@ -78,6 +78,7 @@ type Model struct {
 	status  *StatusController
 	perms   *PermController
 	memory  *MemoryController
+	colony  *ColonyController
 	onboard *splash.Flow
 }
 
@@ -102,6 +103,7 @@ func New(o Options) *Model {
 	m.status = NewStatus(o.Theme, o.Keys, o.Now)
 	m.perms = NewPerm(o.Client, o.Theme)
 	m.memory = NewMemory(o.Client, o.Theme, o.Namespace)
+	m.colony = NewColony(o.Theme)
 	if o.Session != "" {
 		m.session = o.Session
 		m.state = StateChat
@@ -200,6 +202,7 @@ func (m *Model) Update(msg btea.Msg) (btea.Model, btea.Cmd) {
 	m.chat.Apply(msg)
 	m.sidebar.Apply(msg)
 	m.memory.Apply(msg)
+	m.colony.Apply(msg)
 	if m.state == StateLanding && !m.chat.Empty() {
 		m.state = StateChat
 	}
@@ -247,6 +250,8 @@ func (m *Model) global(a keys.Action) btea.Cmd {
 		m.overlay.Push(m.themeDialog(), m.now())
 	case keys.MemoryPanel:
 		return m.memory.Open(m.overlay, m.now())
+	case keys.ColonyPanel:
+		return m.colony.Open(m.overlay, m.now())
 	}
 	return nil
 }

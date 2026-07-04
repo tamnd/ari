@@ -139,6 +139,8 @@ func kp(s string) btea.KeyPressMsg {
 		return btea.KeyPressMsg{Code: 'w', Mod: btea.ModCtrl}
 	case "ctrl+e":
 		return btea.KeyPressMsg{Code: 'e', Mod: btea.ModCtrl}
+	case "ctrl+l":
+		return btea.KeyPressMsg{Code: 'l', Mod: btea.ModCtrl}
 	}
 	return btea.KeyPressMsg{Code: rune(s[0]), Text: s}
 }
@@ -379,6 +381,47 @@ func TestViewGolden(t *testing.T) {
 	b.WriteString("== chat wide ==\n" + renderPlain(h.m, 140, 32))
 	b.WriteString("== chat compact ==\n" + renderPlain(h.m, 80, 24))
 	eval.Golden(t, "frames", b.String())
+}
+
+// workerWoke builds a woke message for the current session so it survives the
+// root's session filter and reaches the colony controller.
+func workerWoke(ant, task string) bus.WorkerWokeMsg {
+	var m bus.WorkerWokeMsg
+	m.Meta = bus.Meta{Session: "s1"}
+	m.WorkerWoke = event.WorkerWoke{Ant: ant, Task: task, Tier: "cheap"}
+	return m
+}
+
+// TestColonyPanelTogglesAndShowsLiveAnts drives the panel end to end from the
+// root: a worker wakes on the live session, ctrl+l opens the panel, the frame
+// shows the live ant, and escape closes it. The worker event reaches the panel
+// through the same projection path every other panel reads.
+func TestColonyPanelTogglesAndShowsLiveAnts(t *testing.T) {
+	h := newHarness(t, Options{})
+	typeText(h, "hi")
+	h.press(kp("enter")) // into chat on session s1
+
+	h.send(workerWoke("forager-0", "sub-a"))
+	h.send(workerWoke("forager-1", "sub-b"))
+
+	h.press(kp("ctrl+l"))
+	if h.m.overlay.Len() != 1 {
+		t.Fatal("ctrl+l did not open the colony panel")
+	}
+	out := renderPlain(h.m, 120, 40)
+	for _, want := range []string{"forager-0", "forager-1"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("open colony panel missing %q:\n%s", want, out)
+		}
+	}
+
+	h.press(kp("esc"))
+	if h.m.overlay.Len() != 0 {
+		t.Fatal("escape did not close the colony panel")
+	}
+	if h.m.colony.open {
+		t.Fatal("closing the panel left the open flag set")
+	}
 }
 
 // renderPlain draws the full frame and strips styling for asserting.

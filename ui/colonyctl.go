@@ -1,11 +1,14 @@
 package ui
 
 import (
+	"time"
+
 	btea "charm.land/bubbletea/v2"
 	uv "github.com/charmbracelet/ultraviolet"
 
 	"github.com/tamnd/ari/ui/bus"
 	"github.com/tamnd/ari/ui/colonyview"
+	"github.com/tamnd/ari/ui/dialog"
 	"github.com/tamnd/ari/ui/tea"
 	"github.com/tamnd/ari/ui/theme"
 )
@@ -23,6 +26,7 @@ type ColonyController struct {
 	ants  map[string]colonyview.Ant
 	order []string // insertion order, so a rebuilt slice is stable before the view sorts
 	focus string   // ant id whose transcript is open, "" for the list
+	open  bool     // the panel is pushed on the overlay
 }
 
 // NewColony builds an empty colony panel. It shows nothing until the first
@@ -76,6 +80,31 @@ func (c *ColonyController) upsert(id string) colonyview.Ant {
 	}
 	return a
 }
+
+// ID identifies the panel for the overlay's same-id reopen detection.
+func (c *ColonyController) ID() string { return "colony" }
+
+// HandleMsg consumes input while the panel is on top. Escape-to-close is the
+// overlay's job, and the panel has no key actions of its own yet, so it reports
+// nothing and lets the live worker stream keep updating it underneath. The
+// drill-in navigation that will read keys here is a later slice.
+func (c *ColonyController) HandleMsg(msg btea.Msg) dialog.Action { return nil }
+
+// Open pushes the panel as a toggled dialog. A second colony keypress never
+// reaches here because the open dialog owns input; the flag guards a double
+// push if one ever did.
+func (c *ColonyController) Open(overlay *dialog.Overlay, now time.Time) btea.Cmd {
+	if c.open {
+		return nil
+	}
+	c.open = true
+	overlay.Push(c, now)
+	return nil
+}
+
+// Closed clears the open flag when the overlay pops the panel on escape, so a
+// later keypress opens a fresh push rather than being swallowed by a stale flag.
+func (c *ColonyController) Closed() { c.open = false }
 
 // Focus opens an ant's drill-in, or clears it when id is "". The transcript
 // itself is fed by a later slice; this records which ant the panel is drilled
