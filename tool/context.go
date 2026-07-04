@@ -55,6 +55,11 @@ type ToolContext struct {
 	// and the ledger can attribute tokens.
 	Ant AntID
 
+	// Namespace is the calling ant's memory namespace (doc 07), the scope
+	// the memory tools read and write. The loop sets it per turn from the
+	// card; empty means no memory is bound and the memory tools refuse.
+	Namespace string
+
 	// Sandbox is the seam sh runs commands through (doc 14). Nil in a
 	// trusted local run means "no sandbox"; non-nil wraps the command.
 	Sandbox Sandbox
