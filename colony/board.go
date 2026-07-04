@@ -103,6 +103,13 @@ type Blackboard interface {
 	Questions(ctx context.Context, taskID string) ([]Question, error)
 	// Answer resolves a question with a Finding and marks the question done.
 	Answer(ctx context.Context, questionID string, ans Finding) error
+	// Complete ends a worker's claim: it validates the result handoff,
+	// stores it parented to the task, and flips the claimed goal to done,
+	// all in one write so the transition cannot race (doc 09 section 5.1).
+	Complete(ctx context.Context, claimID string, result Handoff) (string, error)
+	// Fail marks a claimed goal incomplete, the record a crashed or
+	// cancelled worker leaves behind (doc 09 section 11.1).
+	Fail(ctx context.Context, claimID string) error
 	// Close sweeps a task and every child it parents to expired, the
 	// hours-not-days end of a task graph's life.
 	Close(ctx context.Context, taskID string) error
@@ -134,6 +141,21 @@ func (b *board) Post(ctx context.Context, e Entry) (string, error) {
 		return "", fmt.Errorf("blackboard: payload rejected: %w", err)
 	}
 	now := b.now()
+	b.stamp(&e, now)
+	err := b.db.Write(ctx, func(tx *sql.Tx) error {
+		return b.insert(ctx, tx, e, now)
+	})
+	if err != nil {
+		return "", err
+	}
+	return e.ID, nil
+}
+
+// stamp fills the derived fields a fresh row needs before insertion: its id,
+// kind, origin, opening state, and the created and expiry timestamps. It is
+// shared by Post and Complete so a result row and a goal row are stamped the
+// same way.
+func (b *board) stamp(e *Entry, now time.Time) {
 	if e.ID == "" {
 		e.ID = newID(now)
 	}
@@ -152,37 +174,103 @@ func (b *board) Post(ctx context.Context, e Entry) (string, error) {
 	}
 	e.CreatedAt = now
 	e.ExpiresAt = now.Add(lifetimes[e.Kind])
+}
 
+// insert writes one stamped row, unioning its own labels with any it inherits
+// from its parent so a subtask can never shed its parent's trust (doc 09
+// section 12.2). It runs inside the caller's write transaction.
+func (b *board) insert(ctx context.Context, tx *sql.Tx, e Entry, now time.Time) error {
 	payload, err := json.Marshal(e.Payload)
 	if err != nil {
-		return "", err
+		return err
 	}
+	trust := e.Trust.Union(e.Payload.Hdr().Labels)
+	if e.Parent != "" {
+		inherited, perr := parentTrust(ctx, tx, e.Parent)
+		if perr != nil {
+			return perr
+		}
+		trust = trust.Union(inherited)
+	}
+	labels, merr := json.Marshal(nonNil(trust))
+	if merr != nil {
+		return merr
+	}
+	_, ierr := tx.ExecContext(ctx,
+		`INSERT INTO blackboard
+		   (id, session_id, task_id, parent, origin, kind, goal, payload, agent, state, claim_count, labels, created_at, expires_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
+		e.ID, e.SessionID, e.TaskID, e.Parent, e.Origin, e.Kind, e.Goal, string(payload),
+		e.Agent, e.State, string(labels), now.Unix(), e.ExpiresAt.Unix())
+	return ierr
+}
 
-	err = b.db.Write(ctx, func(tx *sql.Tx) error {
-		trust := e.Trust.Union(e.Payload.Hdr().Labels)
-		if e.Parent != "" {
-			inherited, perr := parentTrust(ctx, tx, e.Parent)
-			if perr != nil {
-				return perr
+// Complete is a worker's clean exit: it stores the result handoff parented to
+// the task and flips the claimed goal to done in one write, so a reader never
+// sees a done result whose goal is still claimed or the reverse. The result
+// inherits the goal's trust through its parent, so a worker cannot launder a
+// label off its work by finishing it (doc 09 sections 5.1 and 12.2).
+func (b *board) Complete(ctx context.Context, claimID string, result Handoff) (string, error) {
+	if result == nil {
+		return "", fmt.Errorf("blackboard: a completion needs a result handoff, never a transcript")
+	}
+	if err := result.Validate(); err != nil {
+		return "", fmt.Errorf("blackboard: result rejected: %w", err)
+	}
+	now := b.now()
+	var resultID string
+	err := b.db.Write(ctx, func(tx *sql.Tx) error {
+		var sessionID, taskID, state string
+		row := tx.QueryRowContext(ctx,
+			`SELECT session_id, task_id, state FROM blackboard WHERE id = ? AND kind = ?`, claimID, EntryGoal)
+		if serr := row.Scan(&sessionID, &taskID, &state); serr != nil {
+			if errors.Is(serr, sql.ErrNoRows) {
+				return ErrNoEntry
 			}
-			trust = trust.Union(inherited)
+			return serr
 		}
-		labels, merr := json.Marshal(nonNil(trust))
-		if merr != nil {
-			return merr
+		if state != string(StateClaimed) {
+			return fmt.Errorf("blackboard: goal %s is not claimed (state %s), cannot complete it", claimID, state)
 		}
-		_, ierr := tx.ExecContext(ctx,
-			`INSERT INTO blackboard
-			   (id, session_id, task_id, parent, origin, kind, goal, payload, agent, state, claim_count, labels, created_at, expires_at)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
-			e.ID, e.SessionID, e.TaskID, e.Parent, e.Origin, e.Kind, e.Goal, string(payload),
-			e.Agent, e.State, string(labels), now.Unix(), e.ExpiresAt.Unix())
-		return ierr
+		e := Entry{SessionID: sessionID, TaskID: taskID, Parent: taskID, Payload: result}
+		b.stamp(&e, now)
+		if ierr := b.insert(ctx, tx, e, now); ierr != nil {
+			return ierr
+		}
+		resultID = e.ID
+		res, uerr := tx.ExecContext(ctx,
+			`UPDATE blackboard SET state = ? WHERE id = ? AND state = ?`, StateDone, claimID, StateClaimed)
+		if uerr != nil {
+			return uerr
+		}
+		if n, _ := res.RowsAffected(); n == 0 {
+			return fmt.Errorf("blackboard: goal %s was claimed out from under the completion", claimID)
+		}
+		return nil
 	})
 	if err != nil {
 		return "", err
 	}
-	return e.ID, nil
+	return resultID, nil
+}
+
+// Fail marks a claimed goal incomplete. It is the record a crashed, timed-out,
+// or cancelled worker leaves: the goal flips to failed, which is not terminal
+// for the graph (orphan recovery may reopen it in a later slice), but is a
+// well-formed row a reader can see, never a half-written result (doc 09
+// section 11.1).
+func (b *board) Fail(ctx context.Context, claimID string) error {
+	return b.db.Write(ctx, func(tx *sql.Tx) error {
+		res, err := tx.ExecContext(ctx,
+			`UPDATE blackboard SET state = ? WHERE id = ? AND state = ?`, StateFailed, claimID, StateClaimed)
+		if err != nil {
+			return err
+		}
+		if n, _ := res.RowsAffected(); n == 0 {
+			return fmt.Errorf("blackboard: goal %s is not claimed, cannot fail it", claimID)
+		}
+		return nil
+	})
 }
 
 // Claim is compare-and-swap inside the writer goroutine: it takes the oldest
