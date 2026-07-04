@@ -27,6 +27,7 @@ const (
 	Cancel
 	FocusNext
 	MemoryPanel
+	ColonyPanel
 
 	// Editor scope.
 	Submit
@@ -59,7 +60,7 @@ const (
 var names = map[string]Action{
 	"quit": Quit, "help": HelpToggle, "palette": Palette,
 	"theme": ThemePick, "cancel": Cancel, "focus_next": FocusNext,
-	"memory": MemoryPanel,
+	"memory": MemoryPanel, "colony": ColonyPanel,
 	"submit": Submit, "newline": Newline, "external_editor": ExternalEditor,
 	"scroll_up": ScrollUp, "scroll_down": ScrollDown,
 	"page_up": PageUp, "page_down": PageDown, "goto_bottom": GotoBottom,
@@ -98,7 +99,8 @@ func (s Scope) String() string {
 var scopeOf = map[Action]Scope{
 	Quit: Global, HelpToggle: Global, Palette: Global,
 	ThemePick: Global, Cancel: Global, FocusNext: Global, MemoryPanel: Global,
-	Submit: Editor, Newline: Editor, ExternalEditor: Editor,
+	ColonyPanel: Global,
+	Submit:      Editor, Newline: Editor, ExternalEditor: Editor,
 	ScrollUp: Chat, ScrollDown: Chat, PageUp: Chat,
 	PageDown: Chat, GotoBottom: Chat,
 	Confirm: Dialog, NextChoice: Dialog, PrevChoice: Dialog,
@@ -125,6 +127,7 @@ func Default() Map {
 		Cancel:      b("cancel", "esc"),
 		FocusNext:   b("switch focus", "ctrl+w"),
 		MemoryPanel: b("memory", "ctrl+r"),
+		ColonyPanel: b("colony", "ctrl+l"),
 
 		Submit:         b("send", "enter"),
 		Newline:        b("newline", "shift+enter", "ctrl+j"),
@@ -240,7 +243,7 @@ func (m Map) Help(scope Scope) []key.Binding {
 	case Diff:
 		actions = []Action{NextHunk, PrevHunk, ToggleDiff, DiffLeft, DiffRight, HelpToggle, Quit}
 	default:
-		actions = []Action{MemoryPanel, HelpToggle, Quit}
+		actions = []Action{ColonyPanel, MemoryPanel, HelpToggle, Quit}
 	}
 	out := make([]key.Binding, len(actions))
 	for i, a := range actions {

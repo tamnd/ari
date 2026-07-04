@@ -51,6 +51,9 @@ func (m *Model) apply(act dialog.Action) btea.Cmd {
 		if v.ID == "memory" {
 			m.memory.Closed()
 		}
+		if v.ID == "colony" {
+			m.colony.Closed()
+		}
 		if m.state == StateOnboarding {
 			// Escaping onboarding is allowed; the shell still works and
 			// the flow returns on the next fresh start.
@@ -200,6 +203,7 @@ func (m *Model) setTheme(name string) {
 	m.status.SetTheme(th)
 	m.perms.SetTheme(th)
 	m.memory.SetTheme(th)
+	m.colony.SetTheme(th)
 }
 
 // modelDialog picks from the configured model list.
