@@ -188,6 +188,71 @@ func TestWorkerReadEditVerify(t *testing.T) {
 	}
 }
 
+// TestBindWiresColonyJournal proves the first seam of the M3 integration:
+// Bind constructs the governor against core's Emit through the journal
+// closure, and a plain-string kernel record lands on the stream as its
+// typed event. It drives the closure directly because dispatch does not
+// route through the governor yet; that arrives when the queen decides
+// single versus fan-out.
+func TestBindWiresColonyJournal(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("ARI_HOME", t.TempDir())
+
+	reg := provider.NewRegistry()
+	p := scripted.New()
+	reg.AddProvider(p)
+	if err := reg.AddTier("frontier", []provider.ChainLink{{Provider: p.Name(), Model: "fable-test"}}); err != nil {
+		t.Fatal(err)
+	}
+
+	r := NewRunner()
+	r.GitStatus = func(string) string { return "## main" }
+	ctx := context.Background()
+	c, err := core.Open(ctx, root,
+		core.WithRunner(r),
+		core.WithRegistry(reg),
+		core.WithConfig(&config.Config{Mode: "ask"}),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Bind(c)
+	if err := c.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := c.Close(); err != nil {
+			t.Errorf("close: %v", err)
+		}
+	})
+
+	if r.governor == nil {
+		t.Fatal("Bind did not construct the governor")
+	}
+	if r.journal == nil {
+		t.Fatal("Bind did not wire the journal closure")
+	}
+
+	sub, err := c.Events(ctx, core.EventFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// A throttle record the governor would raise at max_awake lands as a
+	// typed colony.throttle event carrying the deferred task ids.
+	r.journal(colony.EventThrottle, []string{"task-7"})
+	evs := collect(t, sub, event.TypeColonyThrottle)
+
+	last := evs[len(evs)-1]
+	var th event.ColonyThrottle
+	if err := json.Unmarshal(last.Payload, &th); err != nil {
+		t.Fatal(err)
+	}
+	if len(th.Tasks) != 1 || th.Tasks[0] != "task-7" {
+		t.Errorf("throttle tasks = %v, want [task-7]", th.Tasks)
+	}
+}
+
 // TestPromptPrefixStableAcrossTurns is the D14 cache-alignment test at
 // the session level: across ten turns of one session, the system blocks,
 // the tool definitions, and the block-two message serialize identically;

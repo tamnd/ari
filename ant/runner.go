@@ -65,6 +65,15 @@ type Runner struct {
 	headless bool
 	bound    bool
 
+	// The colony kernel objects live on the runner because ant is the one
+	// package that imports both core and colony (doc 09 section 6.5).
+	// journal lifts the kernel's plain-string records onto core's stream;
+	// governor is the first object wired to it, holding the wake and
+	// fan-out ceilings. The queen, blackboard, and worktrees join when
+	// dispatch routes through them.
+	journal  colony.JournalFunc
+	governor *colony.Governor
+
 	mu      sync.Mutex
 	workers map[core.SessionID]*worker
 }
@@ -118,7 +127,36 @@ func (r *Runner) Bind(c *core.Colony) {
 	// 12, D16).
 	r.hooks = cfg.Hooks()
 	r.trust = hook.LoadTrust(r.nest.TrustFile())
+	// The colony's kernel objects name their records as plain strings and
+	// journal them through this closure, which maps each to its typed event
+	// and puts it on core's stream (doc 09 section 6.5). The governor is the
+	// first object wired, so a ceiling that defers work is auditable the
+	// moment fan-out lands.
+	r.journal = colonyJournal(c)
+	r.governor = colony.NewGovernor(colony.DefaultCapConfig(), r.journal)
 	r.bound = true
+}
+
+// colonyJournal builds the closure that lifts the colony kernel's
+// plain-string records onto the colony's event stream. The kernel is
+// dependency-light and cannot import the event package, so it names its
+// records as strings whose values match the event types to the byte; this
+// closure is the one place that translation lives. An unrecognized name
+// still lands, as a log line, so a new kernel record is never dropped
+// silently.
+func colonyJournal(c *core.Colony) colony.JournalFunc {
+	return func(name string, taskIDs []string) {
+		switch name {
+		case colony.EventThrottle:
+			_ = c.Emit(event.TypeColonyThrottle, "", "", event.ColonyThrottle{Tasks: taskIDs})
+		case colony.EventQuestionUnresolved:
+			_ = c.Emit(event.TypeQuestionUnresolved, "", "", event.QuestionUnresolved{Tasks: taskIDs})
+		case colony.EventWorktreeConflict:
+			_ = c.Emit(event.TypeWorktreeConflict, "", "", event.WorktreeConflict{Tasks: taskIDs})
+		default:
+			_ = c.Emit(event.TypeLog, "", "", event.Log{Level: "debug", Text: name})
+		}
+	}
 }
 
 // Close tears down the runner's background resources. The colony calls it
