@@ -121,14 +121,14 @@ func TestDispatchRunsSubtasksConcurrently(t *testing.T) {
 	}
 	parent, plan := surveyPlan(t, root)
 
-	findings, err := r.dispatch(ctx, c.Store(), sid, parent, plan)
+	res, err := r.dispatch(ctx, c.Store(), sid, parent, plan)
 	if err != nil {
 		t.Fatalf("dispatch: %v", err)
 	}
-	if len(findings) != 2 {
-		t.Fatalf("got %d findings, want 2", len(findings))
+	if len(res.Findings) != 2 {
+		t.Fatalf("got %d findings, want 2", len(res.Findings))
 	}
-	for _, f := range findings {
+	for _, f := range res.Findings {
 		if f.Summary == "" {
 			t.Errorf("finding %s has no summary", f.ID)
 		}

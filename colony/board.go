@@ -104,6 +104,9 @@ type Blackboard interface {
 	Claim(ctx context.Context, antID string, filter ClaimFilter) (Entry, bool, error)
 	// Findings returns the Finding payloads posted for a task.
 	Findings(ctx context.Context, taskID string) ([]Finding, error)
+	// Patches returns the Patch payloads posted for a task, the writer
+	// results reconcile composes into one diff.
+	Patches(ctx context.Context, taskID string) ([]Patch, error)
 	// Questions returns the open Question payloads posted for a task.
 	Questions(ctx context.Context, taskID string) ([]Question, error)
 	// Answer resolves a question with a Finding and marks the question done.
@@ -337,6 +340,35 @@ func (b *board) Findings(ctx context.Context, taskID string) ([]Finding, error) 
 			var f Finding
 			if json.Unmarshal([]byte(payload), &f) == nil && f.Kind == KindFinding {
 				out = append(out, f)
+			}
+		}
+		return rows.Err()
+	})
+	return out, err
+}
+
+// Patches returns the Patch payloads posted for a task, the writer results a
+// fan-out produced for reconcile to compose. A Finding and a Patch land under
+// the same partial kind, so the payload's own header kind is the filter that
+// keeps a survey's finding out of a writer's reconcile.
+func (b *board) Patches(ctx context.Context, taskID string) ([]Patch, error) {
+	var out []Patch
+	err := b.db.Read(ctx, func(db *sql.DB) error {
+		rows, qerr := db.QueryContext(ctx,
+			`SELECT payload FROM blackboard WHERE task_id = ? AND kind = ? ORDER BY created_at`,
+			taskID, EntryPartial)
+		if qerr != nil {
+			return qerr
+		}
+		defer func() { _ = rows.Close() }()
+		for rows.Next() {
+			var payload string
+			if serr := rows.Scan(&payload); serr != nil {
+				return serr
+			}
+			var p Patch
+			if json.Unmarshal([]byte(payload), &p) == nil && p.Kind == KindPatch {
+				out = append(out, p)
 			}
 		}
 		return rows.Err()
