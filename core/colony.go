@@ -218,6 +218,9 @@ func (c *Colony) Start(ctx context.Context) error {
 	if err := c.memory.Start(ctx); err != nil {
 		return Wrap(ErrNest, err, "starting the memory writer")
 	}
+	if err := c.memory.Migrate(ctx); err != nil {
+		return Wrap(ErrNest, err, "migrating colony.db")
+	}
 	c.started = true
 	return nil
 }
