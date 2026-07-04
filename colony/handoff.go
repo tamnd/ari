@@ -101,6 +101,9 @@ type Budget struct {
 
 // TaskBrief tells a worker what to do without telling it how. It is the work
 // order, written by the queen or by a worker decomposing within its ceiling.
+// Intake (doc 06 section 3) adds the routing-facing fields to the same type:
+// the origin and parent that place it in the task graph, the coarse class and
+// the embedding the queen routes on, and the anchors three later steps read.
 type TaskBrief struct {
 	Header
 	Goal        string       `json:"goal"`
@@ -110,6 +113,14 @@ type TaskBrief struct {
 	DirectedTo  string       `json:"directed_to,omitempty"`
 	Budget      Budget       `json:"budget"`
 	DependsOn   []string     `json:"depends_on,omitempty"`
+
+	Origin     Origin    `json:"origin,omitempty"`
+	Parent     string    `json:"parent,omitempty"`
+	Class      TaskClass `json:"class,omitempty"`
+	Anchors    []Anchor  `json:"anchors,omitempty"`
+	Embed      []float32 `json:"embed,omitempty"`
+	EmbedModel string    `json:"embed_model,omitempty"`
+	Deadline   time.Time `json:"deadline,omitzero"`
 }
 
 // Validate checks a brief carries a goal and a deliverable the colony
@@ -124,7 +135,13 @@ func (b TaskBrief) Validate() error {
 	if b.Deliverable != KindFinding && b.Deliverable != KindPatch {
 		return fmt.Errorf("task_brief %s: deliverable must be a finding or a patch, got %q", b.ID, b.Deliverable)
 	}
-	return checkBudget(b)
+	// The embedding is routing metadata the queen reads, not context the
+	// worker reads, so it does not count against the brief's context budget:
+	// a few hundred floats would blow the ceiling that bounds what crosses
+	// between ants, and the worker never looks at it.
+	wire := b
+	wire.Embed = nil
+	return checkBudget(wire)
 }
 
 // Citation anchors a claim to the repo at a moment in time.
