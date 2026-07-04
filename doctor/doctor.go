@@ -105,6 +105,7 @@ func New() *Doctor {
 		{Name: "local config gitignore", Run: checkLocalGitignore},
 		{Name: "workspace trust", Run: checkWorkspaceTrust},
 		{Name: "project memory size", Run: checkProjectMemorySize},
+		{Name: "colony memory", Run: checkColonyMemory},
 		{Name: "language server", Run: checkLanguageServer},
 		{Name: "mcp servers", Run: checkMCPServers},
 		{Name: "bind status", Run: checkBindStatus},
