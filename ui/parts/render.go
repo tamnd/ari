@@ -8,6 +8,7 @@ import (
 
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/tamnd/ari/lsp"
 	"github.com/tamnd/ari/tool"
 	"github.com/tamnd/ari/ui/diff"
 	"github.com/tamnd/ari/ui/markdown"
@@ -169,6 +170,19 @@ func (writeRenderer) Render(p Part, width int, th theme.Theme) Block {
 		}
 		b = append(b, fit(th.S.Diff.GutterAdd.Render("+ ")+th.S.ToolOutput.Render(l), width))
 	}
+	return append(b, diagnosticLines(d.Diagnostics, width, th)...)
+}
+
+// diagnosticLines renders the language server's findings for a write or
+// edit under the content, one red line each with its 1-based position, so
+// the same errors the model reads in its result are visible to the human
+// watching. Nothing when the file came back clean.
+func diagnosticLines(ds []lsp.Diagnostic, width int, th theme.Theme) Block {
+	var b Block
+	for _, d := range ds {
+		line := fmt.Sprintf("%s [%d:%d] %s", strings.ToUpper(d.Severity), d.Line, d.Col, d.Message)
+		b = append(b, ansi.Truncate(th.S.Error.Render(line), width, "…"))
+	}
 	return b
 }
 
@@ -190,7 +204,7 @@ func (editRenderer) Render(p Part, width int, th theme.Theme) Block {
 	for _, l := range diff.Render(d.Diff, width, th, diff.Auto) {
 		b = append(b, ansi.Truncate(l, width, "…"))
 	}
-	return b
+	return append(b, diagnosticLines(d.Diagnostics, width, th)...)
 }
 
 // shRenderer: the command, the captured output, and how it exited.

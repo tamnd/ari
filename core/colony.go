@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"sync"
 	"time"
 
@@ -217,6 +218,13 @@ func (c *Colony) Close() error {
 	c.closing.Do(func() {
 		c.stop()       // cancels every running turn and pump
 		c.turns.Wait() // turns finish emitting before the journal stops
+		// A runner that owns background resources (the ant runner holds the
+		// language servers) gets torn down after its turns have stopped and
+		// before the journal closes, so a spawned gopls does not outlive the
+		// colony.
+		if closer, ok := c.runner.(io.Closer); ok {
+			_ = closer.Close()
+		}
 		c.closeErr = c.journal.Close()
 		c.pumps.Wait()
 	})

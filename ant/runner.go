@@ -16,6 +16,7 @@ import (
 	"github.com/tamnd/ari/core"
 	"github.com/tamnd/ari/event"
 	"github.com/tamnd/ari/kernel/ledger"
+	"github.com/tamnd/ari/lsp"
 	"github.com/tamnd/ari/memory"
 	"github.com/tamnd/ari/nest"
 	"github.com/tamnd/ari/permission"
@@ -46,6 +47,7 @@ type Runner struct {
 	config   *coreConfig
 	nest     nest.Nest
 	asks     Asker
+	lsp      *lsp.Service
 	headless bool
 	bound    bool
 
@@ -56,7 +58,8 @@ type Runner struct {
 // coreConfig is the slice of config the runner reads, so the field list
 // documents the dependency instead of hiding it behind the whole struct.
 type coreConfig struct {
-	mode string
+	mode       string
+	lspEnabled bool
 }
 
 // Asker is how a blocked Ask reaches the client and the answer comes
@@ -87,10 +90,28 @@ func (r *Runner) Bind(c *core.Colony) {
 	defer r.mu.Unlock()
 	r.registry = c.Registry()
 	r.ledger = c.Ledger()
-	r.config = &coreConfig{mode: c.Config().Mode}
+	cfg := c.Config()
+	r.config = &coreConfig{mode: cfg.Mode, lspEnabled: cfg.LSP.Enabled}
 	r.nest = c.Nest()
 	r.asks = c.Asks()
+	// The language-server service is off unless config turns it on. Built
+	// once here and shared by every worker, so the colony runs one gopls per
+	// module, not one per session (doc 04 section 6).
+	r.lsp = lsp.New(lsp.Options{Enabled: r.config.lspEnabled, Root: r.nest.Root})
 	r.bound = true
+}
+
+// Close tears down the runner's background resources. The colony calls it
+// on shutdown through the optional io.Closer seam, so a spawned language
+// server does not outlive the session.
+func (r *Runner) Close() error {
+	r.mu.Lock()
+	svc := r.lsp
+	r.mu.Unlock()
+	if svc != nil {
+		svc.Shutdown()
+	}
+	return nil
 }
 
 // Headless swaps the interactive resolver for the resolver of last
@@ -169,6 +190,7 @@ func (r *Runner) wake(ctx context.Context, t *core.TurnHandle) (*worker, error) 
 		Files: tool.NewFileState(),
 		Ant:   tool.AntID(card.ID),
 		Spill: tool.NewDiskSpill(filepath.Join(r.nest.ProjectStateDir(), "spill")),
+		LSP:   r.lsp,
 	}
 
 	home, _ := os.UserHomeDir()
