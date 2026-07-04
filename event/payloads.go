@@ -263,6 +263,16 @@ type QuestionUnresolved struct {
 	Tasks []string `json:"tasks,omitempty"`
 }
 
+// WorktreeReconciled records a writer fan-out whose combined patch composed
+// cleanly and landed on the working tree after the foreground approved it. Files
+// names the patches that landed, in apply order; Landed is true once the diff is
+// on the tree, so a client can tell an applied reconcile from one still awaiting
+// approval.
+type WorktreeReconciled struct {
+	Files  []string `json:"files,omitempty"`
+	Landed bool     `json:"landed"`
+}
+
 // WorktreeConflict records a reconcile that could not land cleanly, naming
 // the task ids that collided. The clean prefix stays landed; the conflicted
 // patch surfaces to the foreground. Sourced through the JournalFunc seam.
