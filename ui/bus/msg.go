@@ -98,6 +98,23 @@ type (
 		event.MemoryFolded
 	}
 
+	WorkerWokeMsg struct {
+		Meta
+		event.WorkerWoke
+	}
+	WorkerBlockedMsg struct {
+		Meta
+		event.WorkerBlocked
+	}
+	WorkerFinishedMsg struct {
+		Meta
+		event.WorkerFinished
+	}
+	ColonyProgressMsg struct {
+		Meta
+		event.ColonyProgress
+	}
+
 	LedgerTurnMsg struct {
 		Meta
 		event.LedgerTurn
@@ -115,8 +132,8 @@ type (
 // ToMsg is the one translation table from a core event to a tea.Msg and
 // its delivery lane (doc 02 section 3.3). It is the only place in the
 // codebase where that mapping exists; ok is false for event types the UI
-// does not render (including the M2/M3 types that are defined but never
-// emitted in M0).
+// does not render (the remaining M2/M3 types that are defined but not yet
+// projected into a panel).
 func ToMsg(e event.Event) (msg tea.Msg, lane Lane, ok bool) {
 	m := Meta{Seq: e.Seq, Session: e.Session, Turn: e.Turn}
 	switch e.Type {
@@ -184,6 +201,22 @@ func ToMsg(e event.Event) (msg tea.Msg, lane Lane, ok bool) {
 		var v MemoryFoldedMsg
 		v.Meta = m
 		return build(e, &v.MemoryFolded, &v, MustDeliver)
+	case event.TypeWorkerWoke:
+		var v WorkerWokeMsg
+		v.Meta = m
+		return build(e, &v.WorkerWoke, &v, MustDeliver)
+	case event.TypeWorkerBlocked:
+		var v WorkerBlockedMsg
+		v.Meta = m
+		return build(e, &v.WorkerBlocked, &v, MustDeliver)
+	case event.TypeWorkerFinished:
+		var v WorkerFinishedMsg
+		v.Meta = m
+		return build(e, &v.WorkerFinished, &v, MustDeliver)
+	case event.TypeColonyProgress:
+		var v ColonyProgressMsg
+		v.Meta = m
+		return build(e, &v.ColonyProgress, &v, Lossy)
 	case event.TypeLedgerTurn:
 		var v LedgerTurnMsg
 		v.Meta = m

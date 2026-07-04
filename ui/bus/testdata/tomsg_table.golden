@@ -16,6 +16,10 @@ ledger.turn              -> bus.LedgerTurnMsg          lossy
 log                      -> bus.LogMsg                 lossy
 error                    -> bus.ErrorMsg               must-deliver
 turn.finished            -> bus.TurnFinishedMsg        must-deliver
+colony.worker.woke       -> bus.WorkerWokeMsg          must-deliver
+colony.worker.blocked    -> bus.WorkerBlockedMsg       must-deliver
+colony.worker.finished   -> bus.WorkerFinishedMsg      must-deliver
+colony.progress          -> bus.ColonyProgressMsg      lossy
 ant.spawned              -> (skipped)
 route.decided            -> (skipped)
 memory.folded            -> bus.MemoryFoldedMsg        must-deliver
