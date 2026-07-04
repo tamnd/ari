@@ -92,7 +92,10 @@ type Doctor struct {
 	checks []Check
 }
 
-// New builds a doctor with the M0 check list in its fixed order.
+// New builds a doctor with the check list in its fixed order. M1 adds the
+// three checks that audit the surface this milestone opened: an oversized
+// ARI.md the ant only partly reads, the language-server opt-in and whether
+// gopls is present, and the MCP servers a session would attach.
 func New() *Doctor {
 	return &Doctor{checks: []Check{
 		{Name: "nest permissions", Run: checkNestPermissions},
@@ -101,6 +104,9 @@ func New() *Doctor {
 		{Name: "permission mode", Run: checkPermissionMode},
 		{Name: "local config gitignore", Run: checkLocalGitignore},
 		{Name: "workspace trust", Run: checkWorkspaceTrust},
+		{Name: "project memory size", Run: checkProjectMemorySize},
+		{Name: "language server", Run: checkLanguageServer},
+		{Name: "mcp servers", Run: checkMCPServers},
 		{Name: "bind status", Run: checkBindStatus},
 		{Name: "journal continuity", Run: checkJournalContinuity},
 	}}

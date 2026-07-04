@@ -241,3 +241,74 @@ func TestTrustedWorkspaceWithRepoHookIsOK(t *testing.T) {
 		t.Fatalf("trusted repo hook status = %v, want ok (%s)", f.Status, f.Reason)
 	}
 }
+
+func TestOversizedProjectMemoryWarns(t *testing.T) {
+	ctx := freshNest(t)
+	big := strings.Repeat("a house rule that runs long\n", 2000)
+	if err := os.WriteFile(ctx.Nest.ARIMD(), []byte(big), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f := findingFor(t, New().Run(ctx), "project memory size")
+	if f.Status != StatusWarn {
+		t.Fatalf("oversized ARI.md status = %v, want warn (%s)", f.Status, f.Reason)
+	}
+	if !strings.Contains(f.Reason, "over the") {
+		t.Errorf("finding should name the cap: %s", f.Reason)
+	}
+}
+
+func TestLanguageServerOffIsClean(t *testing.T) {
+	ctx := freshNest(t)
+	if f := findingFor(t, New().Run(ctx), "language server"); f.Status != StatusOK {
+		t.Fatalf("LSP off status = %v, want ok (%s)", f.Status, f.Reason)
+	}
+}
+
+func TestEnabledLSPWithoutGoplsWarns(t *testing.T) {
+	ctx := freshNest(t)
+	ctx.Config.LSP.Enabled = true
+	// An empty PATH guarantees gopls is not found, so the check does not
+	// depend on the box the test runs on.
+	t.Setenv("PATH", "")
+	f := findingFor(t, New().Run(ctx), "language server")
+	if f.Status != StatusWarn {
+		t.Fatalf("enabled LSP with no gopls status = %v, want warn (%s)", f.Status, f.Reason)
+	}
+	if !strings.Contains(f.Reason, "gopls") {
+		t.Errorf("finding should name gopls: %s", f.Reason)
+	}
+}
+
+func TestConfiguredMCPServerIsListed(t *testing.T) {
+	ctx := freshNest(t)
+	dir := ctx.Nest.ProjectDir()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	toml := "[servers.sqlite]\ncommand = \"mcp-sqlite\"\n"
+	if err := os.WriteFile(filepath.Join(dir, "mcp.toml"), []byte(toml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f := findingFor(t, New().Run(ctx), "mcp servers")
+	if f.Status != StatusOK {
+		t.Fatalf("configured server status = %v, want ok (%s)", f.Status, f.Reason)
+	}
+	if !strings.Contains(f.Reason, "sqlite") {
+		t.Errorf("finding should list the server: %s", f.Reason)
+	}
+}
+
+func TestMalformedMCPConfigWarns(t *testing.T) {
+	ctx := freshNest(t)
+	dir := ctx.Nest.ProjectDir()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "mcp.toml"), []byte("this is not = valid = toml ["), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f := findingFor(t, New().Run(ctx), "mcp servers")
+	if f.Status != StatusWarn {
+		t.Fatalf("malformed mcp.toml status = %v, want warn (%s)", f.Status, f.Reason)
+	}
+}

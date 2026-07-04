@@ -6,13 +6,17 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/tamnd/ari/event"
 	"github.com/tamnd/ari/hook"
 	"github.com/tamnd/ari/journal"
+	"github.com/tamnd/ari/mcp"
+	"github.com/tamnd/ari/memory"
 )
 
 // checkNestPermissions verifies that the credential directory and the
@@ -312,6 +316,82 @@ func describeHooks(cmds []hook.Command) string {
 		lines = append(lines, hook.Describe(c))
 	}
 	return strings.Join(lines, "; ")
+}
+
+// checkProjectMemorySize warns when ARI.md is larger than the per-file cap
+// the memory loader trims to. An oversized ARI.md is not an error, because
+// the loader caps it and the session still runs, but a file the ant only
+// partly reads is a house rule the operator thinks is in force and is not,
+// so the check names the size and the cap and leaves the trim to the author
+// (doc 01 section 7, D21).
+func checkProjectMemorySize(ctx *Context) Finding {
+	path := ctx.Nest.ARIMD()
+	info, err := os.Stat(path)
+	if os.IsNotExist(err) {
+		return Finding{Status: StatusOK, Reason: "no ARI.md, nothing to size"}
+	}
+	if err != nil {
+		return Finding{Status: StatusWarn, Reason: fmt.Sprintf("could not read %s: %v", path, err)}
+	}
+	if info.Size() > int64(memory.DefaultPerFileCap) {
+		return Finding{
+			Status: StatusWarn,
+			Reason: fmt.Sprintf("ARI.md is %d bytes, over the %d-byte cap, so the ant only reads the first part of it", info.Size(), memory.DefaultPerFileCap),
+			Manual: "Trim ARI.md under the cap, or move the detail into a skill the ant loads on demand, so every house rule in it is actually in force.",
+		}
+	}
+	return Finding{Status: StatusOK, Reason: fmt.Sprintf("ARI.md is %d bytes, under the %d-byte cap", info.Size(), memory.DefaultPerFileCap)}
+}
+
+// checkLanguageServer reports the LSP surface: whether the client is enabled
+// and, when it is, whether gopls is on the PATH. LSP is off by default, so a
+// disabled client is clean and the reason names the opt-in. An enabled client
+// with no gopls is a warning, not an error, because a missing server degrades
+// to zero diagnostics rather than a failed edit (doc 13, plan 02 slice 5), but
+// the operator asked for diagnostics and is not getting them, so it is worth a
+// line.
+func checkLanguageServer(ctx *Context) Finding {
+	if ctx.Config == nil || !ctx.Config.LSP.Enabled {
+		return Finding{Status: StatusOK, Reason: "LSP is off; enable it in config to get diagnostics folded into edit results"}
+	}
+	if _, err := exec.LookPath("gopls"); err != nil {
+		return Finding{
+			Status: StatusWarn,
+			Reason: "LSP is enabled but gopls is not on the PATH, so Go edits get no diagnostics",
+			Manual: "Install gopls (go install golang.org/x/tools/gopls@latest) and make sure it is on the PATH, or turn LSP off if you do not want it.",
+		}
+	}
+	return Finding{Status: StatusOK, Reason: "LSP is enabled and gopls is on the PATH"}
+}
+
+// checkMCPServers lists the MCP servers the config chain declares, so the
+// operator can see the tool surface a session would attach at a glance. A
+// server is untrusted content by construction (D20), so naming them here is
+// the audit companion to the workspace-trust check that gates hooks: together
+// they show the two outside surfaces this milestone added. A malformed mcp.toml
+// is a warning that names the file rather than a silent drop.
+func checkMCPServers(ctx *Context) Finding {
+	cfg, err := mcp.Discover(mcp.Options{
+		Root:      ctx.Nest.Root,
+		Cwd:       ctx.Nest.Root,
+		GlobalDir: ctx.Nest.Global,
+	})
+	if err != nil {
+		return Finding{
+			Status: StatusWarn,
+			Reason: fmt.Sprintf("an mcp.toml did not parse, so its servers will not load: %v", err),
+			Manual: "Fix the toml syntax the reason names, then rerun doctor.",
+		}
+	}
+	if len(cfg.Servers) == 0 {
+		return Finding{Status: StatusOK, Reason: "no MCP servers configured"}
+	}
+	names := make([]string, 0, len(cfg.Servers))
+	for name := range cfg.Servers {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return Finding{Status: StatusOK, Reason: fmt.Sprintf("%d MCP server(s) configured: %s", len(names), strings.Join(names, ", "))}
 }
 
 // checkJournalContinuity verifies the event log is readable and its
