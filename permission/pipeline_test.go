@@ -220,6 +220,41 @@ func TestEnvSmugglingIsDenied(t *testing.T) {
 	}
 }
 
+// TestSafetyDenyNeverReachesResolver is the slice-15 asymmetry: a worker's
+// resolver auto-denies an ask and posts a Question, but a bypass-immune safety
+// deny (a nest file, a VCS internal, a shell config) is final at the floor and
+// never reaches the resolver, so it is never even offered as a Question a user
+// could rubber-stamp. Only the ask-tier decisions a human legitimately owns
+// become Questions.
+func TestSafetyDenyNeverReachesResolver(t *testing.T) {
+	ctx := context.Background()
+	p := newPipeline(t, ModeAsk, nil, nil, nil)
+	consulted := 0
+	p.Resolver = ResolverFunc(func(context.Context, *Request) (Resolution, bool) {
+		consulted++
+		return Resolution{Behavior: Deny}, true
+	})
+
+	// A write into the nest is denied at stage 5, below every bypass.
+	nestFile := filepath.Join(p.Paths.Nest, "colony.db")
+	if d := p.Decide(ctx, writeCall(p, nestFile, "x")); d.Behavior != Deny || d.Reason.Stage != StageSafety {
+		t.Fatalf("nest write decision = %+v, want a safety deny", d)
+	}
+	if consulted != 0 {
+		t.Fatalf("the resolver was consulted %d times on a safety deny; a safety deny is final, never a Question", consulted)
+	}
+
+	// An ordinary ask-tier call does reach the resolver, which is where the
+	// colony worker auto-denies and posts its Question.
+	outside := filepath.Join(t.TempDir(), "notes.txt")
+	if d := p.Decide(ctx, writeCall(p, outside, "x")); d.Reason.Stage != StageDefault {
+		t.Fatalf("outside-root write decision = %+v, want a default ask", d)
+	}
+	if consulted != 1 {
+		t.Errorf("resolver consulted %d times on an ask-tier call, want exactly 1", consulted)
+	}
+}
+
 // TestWrapperSmugglingIsDenied pins the fixed-point wrapper stripping:
 // no depth of nohup, timeout, and nice hides the real command.
 func TestWrapperSmugglingIsDenied(t *testing.T) {

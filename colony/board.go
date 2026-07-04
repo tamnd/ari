@@ -43,6 +43,11 @@ const (
 	StateDone    State = "done"
 	StateFailed  State = "failed"
 	StateExpired State = "expired"
+	// StateBlocked is a subtask paused on a Question its worker auto-denied
+	// and nobody answered before the graph closed. It is not done and not a
+	// plain expiry: a reader can tell a task that ran out of time from one
+	// that stopped waiting on a human (doc 09 section 8).
+	StateBlocked State = "blocked"
 )
 
 // lifetimes give each kind its hours-not-days expiry: goals and claims live
@@ -111,8 +116,11 @@ type Blackboard interface {
 	// cancelled worker leaves behind (doc 09 section 11.1).
 	Fail(ctx context.Context, claimID string) error
 	// Close sweeps a task and every child it parents to expired, the
-	// hours-not-days end of a task graph's life.
-	Close(ctx context.Context, taskID string) error
+	// hours-not-days end of a task graph's life. A Question left open when
+	// the graph closes is not swept silently: it is journaled unresolved and
+	// its subtask is marked blocked, so an unanswered block is a record, not
+	// a phantom completion (doc 09 section 8). The journal seam may be nil.
+	Close(ctx context.Context, taskID string, journal JournalFunc) error
 }
 
 // board is the SQLite-backed Blackboard over colony.db.
@@ -404,14 +412,78 @@ func (b *board) Answer(ctx context.Context, questionID string, ans Finding) erro
 // Close sweeps a task and every child it parents to expired. This is the
 // hours-not-days end of a task graph: when the parent is done, the live
 // coordination state around it has no reason to persist.
-func (b *board) Close(ctx context.Context, taskID string) error {
+//
+// An open blocking Question is the one thing not swept away quietly. Before the
+// expiry sweep, each open blocking question under the graph is journaled as
+// unresolved and its subtask is marked blocked, so a worker that stopped waiting
+// on a human leaves a record a reader can tell from a task that merely ran out
+// of time, and the subtask is never mistaken for completed (doc 09 section 8).
+func (b *board) Close(ctx context.Context, taskID string, journal JournalFunc) error {
 	return b.db.Write(ctx, func(tx *sql.Tx) error {
+		if err := b.blockOpenQuestions(ctx, tx, taskID, journal); err != nil {
+			return err
+		}
+		// Expire the rest, leaving done, already-expired, and the just-blocked
+		// rows untouched so the block record survives the sweep.
 		_, err := tx.ExecContext(ctx,
 			`UPDATE blackboard SET state = ?
-			   WHERE state NOT IN (?, ?) AND (task_id = ? OR parent = ?)`,
-			StateExpired, StateExpired, StateDone, taskID, taskID)
+			   WHERE state NOT IN (?, ?, ?) AND (task_id = ? OR parent = ?)`,
+			StateExpired, StateExpired, StateDone, StateBlocked, taskID, taskID)
 		return err
 	})
+}
+
+// blockOpenQuestions finds every open blocking Question under the graph, marks
+// it and the subtask it paused blocked, and journals each as unresolved. It runs
+// inside Close's write transaction so the block records and the expiry sweep
+// commit together. It returns the count blocked, for the caller's own record.
+func (b *board) blockOpenQuestions(ctx context.Context, tx *sql.Tx, taskID string, journal JournalFunc) error {
+	rows, err := tx.QueryContext(ctx,
+		`SELECT id, task_id, payload FROM blackboard
+		   WHERE kind = ? AND state = ? AND (task_id = ? OR parent = ?)`,
+		EntryQuestion, StateOpen, taskID, taskID)
+	if err != nil {
+		return err
+	}
+	type openQ struct{ id, task string }
+	var open []openQ
+	for rows.Next() {
+		var id, qtask, payload string
+		if serr := rows.Scan(&id, &qtask, &payload); serr != nil {
+			_ = rows.Close()
+			return serr
+		}
+		var q Question
+		if json.Unmarshal([]byte(payload), &q) != nil || !q.Blocking {
+			continue // a non-blocking advisory question just expires with the rest
+		}
+		open = append(open, openQ{id: id, task: qtask})
+	}
+	if cerr := rows.Close(); cerr != nil {
+		return cerr
+	}
+	if rerr := rows.Err(); rerr != nil {
+		return rerr
+	}
+
+	for _, q := range open {
+		// The question row itself is blocked, so a reader still finds the ask.
+		if _, err := tx.ExecContext(ctx,
+			`UPDATE blackboard SET state = ? WHERE id = ?`, StateBlocked, q.id); err != nil {
+			return err
+		}
+		// The subtask the worker was on is blocked too, never left claimed or
+		// swept to a plain expiry that reads like it simply timed out.
+		if _, err := tx.ExecContext(ctx,
+			`UPDATE blackboard SET state = ? WHERE task_id = ? AND kind = ? AND state NOT IN (?, ?)`,
+			StateBlocked, q.task, EntryGoal, StateDone, StateBlocked); err != nil {
+			return err
+		}
+		if journal != nil {
+			journal(EventQuestionUnresolved, []string{q.id})
+		}
+	}
+	return nil
 }
 
 // parentTrust reads a parent row's labels so a child can inherit them. A
