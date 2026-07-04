@@ -79,6 +79,7 @@ type Runner struct {
 	board     colony.Blackboard
 	worktrees *colony.Worktrees
 	intake    *colony.Intake
+	trails    colony.TrailStore
 	emit      func(typ event.Type, session, turn string, payload any) error
 
 	// builtins registers the starting population once, on the first turn
@@ -160,8 +161,8 @@ func (r *Runner) Bind(c *core.Colony) {
 	// The trail store shares the one colony.db and seeds its sampler from the
 	// clock; the queen reads it for the Thompson draw when a class has more
 	// than one eligible ant. A nil rng lets both seed themselves.
-	trails := colony.NewTrailStore(db, trailHalfLifeDays, time.Now, nil)
-	r.queen = colony.NewQueen(r.cards).WithRouting(trails, colony.DefaultRouteConfig(), nil)
+	r.trails = colony.NewTrailStore(db, trailHalfLifeDays, time.Now, nil)
+	r.queen = colony.NewQueen(r.cards).WithRouting(r.trails, colony.DefaultRouteConfig(), nil)
 	r.board = colony.NewBlackboard(db, time.Now)
 	r.worktrees = colony.NewWorktrees(r.nest.Root, r.nest.ProjectStateDir(), gitRunner{})
 	// Intake turns a foreground request into a brief. The model-tier

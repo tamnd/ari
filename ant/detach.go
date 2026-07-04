@@ -10,6 +10,7 @@ import (
 
 	"github.com/tamnd/ari/agent"
 	"github.com/tamnd/ari/colony"
+	"github.com/tamnd/ari/kernel/ledger"
 	"github.com/tamnd/ari/provider"
 	"github.com/tamnd/ari/session"
 	"github.com/tamnd/ari/tool"
@@ -42,6 +43,7 @@ type Detachment struct {
 	baseRef string // the ref a patch is diffed against, "" defaults to HEAD
 
 	lastText string // the most recent assistant text, harvested into the handoff
+	tokens   int64  // input+output tokens summed across the worker's turns
 }
 
 // DetachConfig is what building a colony worker needs: the card it runs under,
@@ -57,7 +59,12 @@ type DetachConfig struct {
 	Store    session.Store
 	Provider provider.Provider
 	Model    string
-	Cwd      string
+	// Ledger meters the worker's model turns. A background worker is metered
+	// the same as the foreground (D22): nil skips the meter, and the runner
+	// wires the colony's one ledger so a fan-out's cost lands on the same books
+	// as everything else.
+	Ledger *ledger.Ledger
+	Cwd    string
 	// BaseRef is the ref a patch deliverable is diffed against, the commit the
 	// worker's worktree branched from. Empty defaults to HEAD, which is the
 	// worktree's own base after Create. It is unused for a finding.
@@ -111,8 +118,24 @@ func NewDetachment(cfg DetachConfig) (*Detachment, error) {
 		Tier:    string(cfg.Card.Tier),
 		Limits:  agent.Limits{MaxTurns: workerMaxTurns},
 	}
+	// Metering rides the loop's per-turn Record seam. The wrapper both forwards
+	// the row to the colony ledger and sums the turn's tokens onto the worker,
+	// so the runner can fold the total into the ant's trail when the task ends.
+	// The loop drives one detachment on one goroutine, so the running sum needs
+	// no lock; Tokens is read only after Run returns.
+	if cfg.Ledger != nil {
+		d.loop.Record = func(row ledger.Row) {
+			d.tokens += int64(row.Usage.Input) + int64(row.Usage.Output)
+			cfg.Ledger.Record(row)
+		}
+	}
 	return d, nil
 }
+
+// Tokens reports the input-plus-output tokens the worker spent across its
+// turns, the cost the runner folds into the ant's trail fitness. It is valid
+// after Run returns.
+func (d *Detachment) Tokens() int64 { return d.tokens }
 
 // Run drives the worker to a terminal reason and reduces its result to a typed
 // handoff. A clean finish posts the handoff and marks the claim done; anything
