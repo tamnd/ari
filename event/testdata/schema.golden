@@ -3,6 +3,17 @@ schema major 1
 envelope Event: v:int, seq:int, type:string, session?:string, turn?:string, time:time, payload?:raw
 
 ant.spawned: id:string, card:string
+colony.arbitration.closed: subject:string, decision:string, for:int, against:int, decided_by:string
+colony.arbitration.opened: subject:string, members?:[]string, stakes:string
+colony.fanout.approved: task:string, subtasks:int, independence_by:string, workload:string, specialist?:string, projected:int, remaining:int
+colony.fanout.refused: task:string, failed:string, reason?:string
+colony.progress: ant:string, task:string, tokens?:int, note?:string
+colony.question.unresolved: tasks?:[]string
+colony.throttle: reason:string, tasks?:[]string
+colony.worker.blocked: ant:string, task:string, question:string
+colony.worker.finished: ant:string, task:string, ok:bool
+colony.worker.woke: ant:string, task:string, tier?:string
+colony.worktree.conflict: tasks?:[]string
 error: code:string, message:string, retryable:bool, ant?:string, cause?:string
 hello: schema:int, cursor:int, server:string
 ledger.turn: turn:string, model:string, input:int, output:int, cache_read:int, cache_write:int, cost_usd:float, cache_rate:float

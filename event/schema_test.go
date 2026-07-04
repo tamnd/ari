@@ -42,6 +42,17 @@ var payloadFor = map[Type]any{
 	TypeAntSpawned:          AntSpawned{},
 	TypeRouteDecided:        RouteDecided{},
 	TypeMemoryFolded:        MemoryFolded{},
+	TypeFanOutApproved:      FanOutApproved{},
+	TypeFanOutRefused:       FanOutRefused{},
+	TypeColonyThrottle:      ColonyThrottle{},
+	TypeWorkerWoke:          WorkerWoke{},
+	TypeWorkerBlocked:       WorkerBlocked{},
+	TypeWorkerFinished:      WorkerFinished{},
+	TypeColonyProgress:      ColonyProgress{},
+	TypeQuestionUnresolved:  QuestionUnresolved{},
+	TypeWorktreeConflict:    WorktreeConflict{},
+	TypeArbitrationOpened:   ArbitrationOpened{},
+	TypeArbitrationClosed:   ArbitrationClosed{},
 }
 
 // TestSchemaGolden renders every payload's JSON shape and compares it to

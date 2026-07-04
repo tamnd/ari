@@ -185,3 +185,101 @@ type MemoryFolded struct {
 	Archived    int    `json:"archived"`
 	Candidates  int    `json:"candidates"`
 }
+
+// FanOutApproved is the loud half of D5: when the queen splits a task it
+// publishes exactly why, so a human can audit a colony that woke and see
+// which of the three tests let it through. The fields are the rendered
+// FanOutArg the gate produced.
+type FanOutApproved struct {
+	Task           string `json:"task"`
+	Subtasks       int    `json:"subtasks"`
+	IndependenceBy string `json:"independence_by"`
+	Workload       string `json:"workload"`
+	Specialist     string `json:"specialist,omitempty"`
+	Projected      int64  `json:"projected"`
+	Remaining      int64  `json:"remaining"`
+}
+
+// FanOutRefused is the quiet half of D5: the queen names the failing test
+// and stays single-ant. It rides the debug lane, not the normal stream, so
+// a session is not cluttered with decisions not taken.
+type FanOutRefused struct {
+	Task   string `json:"task"`
+	Failed string `json:"failed"` // independence, workload, budget
+	Reason string `json:"reason,omitempty"`
+}
+
+// ColonyThrottle records a ceiling deferring work: a wake refused at
+// max_awake, or a fan-out batch refused at max_fanout_session. Tasks are the
+// ids deferred. Sourced from the governor through the JournalFunc seam.
+type ColonyThrottle struct {
+	Reason string   `json:"reason"` // max_awake, max_fanout_session
+	Tasks  []string `json:"tasks,omitempty"`
+}
+
+// WorkerWoke marks a worker ant starting a subtask. It rides the
+// must-deliver lane: the colony view is never wrong about who is alive.
+type WorkerWoke struct {
+	Ant  string `json:"ant"`
+	Task string `json:"task"`
+	Tier string `json:"tier,omitempty"`
+}
+
+// WorkerBlocked marks a worker stopping on a Question it cannot answer. It
+// rides the must-deliver lane and carries the ask so the view shows it
+// inline for the user to answer from the list.
+type WorkerBlocked struct {
+	Ant      string `json:"ant"`
+	Task     string `json:"task"`
+	Question string `json:"question"`
+}
+
+// WorkerFinished marks a worker ending its subtask. It rides the
+// must-deliver lane so the view always settles a done worker.
+type WorkerFinished struct {
+	Ant  string `json:"ant"`
+	Task string `json:"task"`
+	OK   bool   `json:"ok"`
+}
+
+// ColonyProgress is a worker's climbing token count or a short status note.
+// It rides the lossy lane (D18): a dropped tick is not a correctness
+// problem, and the next tick supersedes it.
+type ColonyProgress struct {
+	Ant    string `json:"ant"`
+	Task   string `json:"task"`
+	Tokens int64  `json:"tokens,omitempty"`
+	Note   string `json:"note,omitempty"`
+}
+
+// QuestionUnresolved records a blocking Question left open when its task
+// graph closed: a worker that stopped waiting on a human, marked blocked
+// rather than swept to expired. Sourced through the JournalFunc seam.
+type QuestionUnresolved struct {
+	Tasks []string `json:"tasks,omitempty"`
+}
+
+// WorktreeConflict records a reconcile that could not land cleanly, naming
+// the task ids that collided. The clean prefix stays landed; the conflicted
+// patch surfaces to the foreground. Sourced through the JournalFunc seam.
+type WorktreeConflict struct {
+	Tasks []string `json:"tasks,omitempty"`
+}
+
+// ArbitrationOpened marks a quorum convened over disagreeing Verdicts. Stakes
+// names the quorum size the disagreement earned.
+type ArbitrationOpened struct {
+	Subject string   `json:"subject"`
+	Members []string `json:"members,omitempty"`
+	Stakes  string   `json:"stakes"`
+}
+
+// ArbitrationClosed records how an arbitration landed: the decision, the vote
+// split, and who decided, so a human can audit a judgment the colony made.
+type ArbitrationClosed struct {
+	Subject   string `json:"subject"`
+	Decision  string `json:"decision"`
+	For       int    `json:"for"`
+	Against   int    `json:"against"`
+	DecidedBy string `json:"decided_by"`
+}
