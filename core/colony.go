@@ -12,6 +12,7 @@ import (
 	"github.com/tamnd/ari/event"
 	"github.com/tamnd/ari/journal"
 	"github.com/tamnd/ari/kernel/ledger"
+	"github.com/tamnd/ari/memory/fold"
 	memsqlite "github.com/tamnd/ari/memory/sqlite"
 	"github.com/tamnd/ari/nest"
 	"github.com/tamnd/ari/provider"
@@ -24,17 +25,18 @@ import (
 // Every client (TUI, one-shot, json stream, serve) drives it through this
 // type (doc 01 section 4.1).
 type Colony struct {
-	nest     nest.Nest
-	config   *config.Config
-	bus      *bus.Bus
-	journal  *journal.Journal
-	memory   *memsqlite.Store
-	store    session.Store
-	runner   TurnRunner
-	flags    config.FlagOverrides
-	registry *provider.Registry
-	ledger   *ledger.Ledger
-	asks     *Asks
+	nest         nest.Nest
+	config       *config.Config
+	bus          *bus.Bus
+	journal      *journal.Journal
+	memory       *memsqlite.Store
+	store        session.Store
+	runner       TurnRunner
+	flags        config.FlagOverrides
+	registry     *provider.Registry
+	ledger       *ledger.Ledger
+	consolidator *fold.Consolidator
+	asks         *Asks
 
 	mu       sync.Mutex
 	started  bool
@@ -187,8 +189,28 @@ func Open(ctx context.Context, dir string, opts ...Option) (*Colony, error) {
 	c.ledger = ledger.New(ledger.DefaultPrices(), ledger.WithSink(func(e event.Event) {
 		c.journal.Append(e)
 	}))
+	// The consolidator is the one writer of live memory (D12). It folds on the
+	// cheap tier and reports each folded namespace back onto the stream. The
+	// loop triggers it at idle and session end; until the loop lands, Fold is
+	// the entry point a client or a test drives.
+	c.consolidator = fold.New(c.memory, newCheapSummarizer(c.registry, c.ledger), c.onFolded)
 	c.ctx, c.stop = context.WithCancel(context.Background())
 	return c, nil
+}
+
+// onFolded puts a memory.folded event on the stream for one folded namespace.
+// The wire payload carries the net effect, not the fold's internal accounting.
+func (c *Colony) onFolded(r fold.FoldReport) {
+	_ = c.emit(event.TypeMemoryFolded, "", "", r.WirePayload())
+}
+
+// Fold runs one consolidation cycle over every namespace with pending
+// candidates and emits a memory.folded event per folded namespace. At most one
+// fold runs at a time across the colony, so overlapping triggers are safe: a
+// second call while a fold is in flight is a no-op. It returns the reports so a
+// caller can see what the fold did.
+func (c *Colony) Fold(ctx context.Context) ([]fold.FoldReport, error) {
+	return c.consolidator.Fold(ctx)
 }
 
 // Config exposes the loaded config read-only, for doctor and the clients.

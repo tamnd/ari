@@ -74,6 +74,54 @@ func (s *Store) InsertCandidate(ctx context.Context, id string, c Candidate) err
 	})
 }
 
+// CandidateDetails loads the anchors and evidence for a set of candidate ids,
+// the edges PendingCandidates leaves in their own tables until a fold needs
+// them. It returns two maps keyed by candidate id so the consolidator can
+// union a group's anchors and carry a reflection candidate's evidence forward
+// without a query per candidate.
+func (s *Store) CandidateDetails(ctx context.Context, ids []string) (map[string][]Anchor, map[string][]string, error) {
+	anchors := map[string][]Anchor{}
+	evidence := map[string][]string{}
+	if len(ids) == 0 {
+		return anchors, evidence, nil
+	}
+	err := s.Read(ctx, func(db *sql.DB) error {
+		ph, args := placeholders(ids)
+		arows, err := db.QueryContext(ctx,
+			`SELECT candidate_id, kind, ref, COALESCE(file_hash, '') FROM candidate_anchor WHERE candidate_id IN (`+ph+`)`, args...)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = arows.Close() }()
+		for arows.Next() {
+			var id string
+			var a Anchor
+			if err := arows.Scan(&id, &a.Kind, &a.Ref, &a.FileHash); err != nil {
+				return err
+			}
+			anchors[id] = append(anchors[id], a)
+		}
+		if err := arows.Err(); err != nil {
+			return err
+		}
+		erows, err := db.QueryContext(ctx,
+			`SELECT candidate_id, evidence_id FROM candidate_evidence WHERE candidate_id IN (`+ph+`)`, args...)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = erows.Close() }()
+		for erows.Next() {
+			var id, ev string
+			if err := erows.Scan(&id, &ev); err != nil {
+				return err
+			}
+			evidence[id] = append(evidence[id], ev)
+		}
+		return erows.Err()
+	})
+	return anchors, evidence, err
+}
+
 // PendingCandidates returns the unfolded candidates in one namespace, oldest
 // first, the work queue the consolidator drains at a fold. A limit of zero or
 // less returns every pending row. The anchors and evidence stay in their own

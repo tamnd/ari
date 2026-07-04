@@ -73,45 +73,52 @@ func (s *Store) InsertMemory(ctx context.Context, m Memory, anchors []Anchor, ev
 		return fmt.Errorf("a reflection needs at least one piece of evidence: name the observations it rests on before recording it")
 	}
 	return s.Write(ctx, func(tx *sql.Tx) error {
-		var embedding any // NULL when no vector, so FTS-only rows stay honest
-		if len(m.Embedding) > 0 {
-			embedding = encodeVector(m.Embedding)
-		}
-		var embedModel any
-		if m.EmbedModel != "" {
-			embedModel = m.EmbedModel
-		}
-		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO memories (
-				id, namespace, kind, label, body, embedding, embed_model,
-				importance, created_at, accessed_at, access_count,
-				source_ant, source_task, anchor_commit, ttl_class, read_only, pinned
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			m.ID, m.Namespace, m.Kind, m.Label, m.Body, embedding, embedModel,
-			m.Importance, m.CreatedAt, m.AccessedAt, m.AccessCount,
-			m.SourceAnt, nullString(m.SourceTask), nullString(m.AnchorCommit),
-			m.TTLClass, boolToInt(m.ReadOnly), boolToInt(m.Pinned),
+		return insertMemoryTx(ctx, tx, m, anchors, evidence)
+	})
+}
+
+// insertMemoryTx writes one live memory row with its anchors and evidence
+// inside an existing transaction, the shared body of InsertMemory and the
+// consolidator's CommitFold so both write a row the same way.
+func insertMemoryTx(ctx context.Context, tx *sql.Tx, m Memory, anchors []Anchor, evidence []string) error {
+	var embedding any // NULL when no vector, so FTS-only rows stay honest
+	if len(m.Embedding) > 0 {
+		embedding = encodeVector(m.Embedding)
+	}
+	var embedModel any
+	if m.EmbedModel != "" {
+		embedModel = m.EmbedModel
+	}
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO memories (
+			id, namespace, kind, label, body, embedding, embed_model,
+			importance, created_at, accessed_at, access_count,
+			source_ant, source_task, anchor_commit, ttl_class, read_only, pinned
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		m.ID, m.Namespace, m.Kind, m.Label, m.Body, embedding, embedModel,
+		m.Importance, m.CreatedAt, m.AccessedAt, m.AccessCount,
+		m.SourceAnt, nullString(m.SourceTask), nullString(m.AnchorCommit),
+		m.TTLClass, boolToInt(m.ReadOnly), boolToInt(m.Pinned),
+	); err != nil {
+		return err
+	}
+	for _, a := range anchors {
+		if _, err := tx.ExecContext(ctx,
+			`INSERT INTO memory_anchor (memory_id, kind, ref, file_hash) VALUES (?, ?, ?, ?)`,
+			m.ID, a.Kind, a.Ref, nullString(a.FileHash),
 		); err != nil {
 			return err
 		}
-		for _, a := range anchors {
-			if _, err := tx.ExecContext(ctx,
-				`INSERT INTO memory_anchor (memory_id, kind, ref, file_hash) VALUES (?, ?, ?, ?)`,
-				m.ID, a.Kind, a.Ref, nullString(a.FileHash),
-			); err != nil {
-				return err
-			}
+	}
+	for _, ev := range evidence {
+		if _, err := tx.ExecContext(ctx,
+			`INSERT INTO memory_evidence (memory_id, evidence_id) VALUES (?, ?)`,
+			m.ID, ev,
+		); err != nil {
+			return err
 		}
-		for _, ev := range evidence {
-			if _, err := tx.ExecContext(ctx,
-				`INSERT INTO memory_evidence (memory_id, evidence_id) VALUES (?, ?)`,
-				m.ID, ev,
-			); err != nil {
-				return err
-			}
-		}
-		return nil
-	})
+	}
+	return nil
 }
 
 // encodeVector packs a float32 slice into a little-endian BLOB, the on-disk
