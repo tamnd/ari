@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/tamnd/ari/event"
+	"github.com/tamnd/ari/hook"
 	"github.com/tamnd/ari/journal"
 )
 
@@ -264,6 +265,53 @@ func appendLocalIgnore(ctx *Context) error {
 // rather than one bolted on after the port is live (section 12.1).
 func checkBindStatus(ctx *Context) Finding {
 	return Finding{Status: StatusOK, Reason: "no serve listener is configured; nothing is bound beyond loopback"}
+}
+
+// checkWorkspaceTrust reports the hook trust gate: whether this workspace is
+// trusted and which of its configured hooks would run. A repo can carry hooks
+// in its committed config, and those never run until the operator explicitly
+// trusts the workspace, so an untrusted workspace with repo hooks is a warning
+// that names them rather than a silent no-op (doc 05 section 12, D16). User
+// hooks always run because the operator wrote them, so they are reported as
+// active regardless of trust.
+func checkWorkspaceTrust(ctx *Context) Finding {
+	if ctx.Config == nil {
+		return Finding{Status: StatusOK, Reason: "no config loaded, no hooks to gate"}
+	}
+	var user, repo []hook.Command
+	for _, c := range ctx.Config.Hooks() {
+		if c.Layer == "user" {
+			user = append(user, c)
+		} else {
+			repo = append(repo, c)
+		}
+	}
+	if len(user) == 0 && len(repo) == 0 {
+		return Finding{Status: StatusOK, Reason: "no hooks configured"}
+	}
+	trusted := hook.LoadTrust(ctx.Nest.TrustFile()).IsTrusted(ctx.Nest.Root)
+	if len(repo) == 0 {
+		return Finding{Status: StatusOK, Reason: fmt.Sprintf("%d user hook(s) active; no repo hooks to gate", len(user))}
+	}
+	if trusted {
+		return Finding{Status: StatusOK, Reason: fmt.Sprintf("workspace is trusted; %d user and %d repo hook(s) active", len(user), len(repo))}
+	}
+	return Finding{
+		Status: StatusWarn,
+		Reason: fmt.Sprintf("this workspace is untrusted, so %d repo hook(s) will not run: %s", len(repo), describeHooks(repo)),
+		Manual: "Review the hooks above, then run `ari trust` in this workspace to let its repo hooks run. Leave it untrusted if you did not write them.",
+	}
+}
+
+// describeHooks renders a short, comma-joined summary of the repo hooks a
+// doctor finding names, so the operator sees what trusting the workspace would
+// let run before deciding.
+func describeHooks(cmds []hook.Command) string {
+	lines := make([]string, 0, len(cmds))
+	for _, c := range cmds {
+		lines = append(lines, hook.Describe(c))
+	}
+	return strings.Join(lines, "; ")
 }
 
 // checkJournalContinuity verifies the event log is readable and its

@@ -100,6 +100,74 @@ func TestUnknownKeyWarnsNotCrashes(t *testing.T) {
 	}
 }
 
+func TestHooksParseWithLayers(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "sk-test")
+	user := `
+[[hooks.PreToolUse]]
+matcher = "sh"
+command = "echo user-hook"
+`
+	project := `
+[[hooks.PostToolUse]]
+matcher = "write|edit"
+command = "gofmt -w ."
+timeout = "30s"
+`
+	n := testNest(t, user, project, "")
+	c, err := Load(n, FlagOverrides{})
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	hooks := c.Hooks()
+	if len(hooks) != 2 {
+		t.Fatalf("hooks = %d, want 2", len(hooks))
+	}
+	// User layer loads first, so its hook is tagged "user"; the project hook
+	// is tagged "project", which is what the trust gate keys on.
+	if hooks[0].Layer != "user" || hooks[0].Event != "PreToolUse" {
+		t.Errorf("first hook: %+v", hooks[0])
+	}
+	if hooks[1].Layer != "project" || hooks[1].Event != "PostToolUse" {
+		t.Errorf("second hook: %+v", hooks[1])
+	}
+	if !hooks[1].Applies("write") || hooks[1].Applies("read") {
+		t.Errorf("project matcher wrong: %+v", hooks[1])
+	}
+}
+
+func TestUnknownHookEventWarns(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "sk-test")
+	user := "[[hooks.Nonsense]]\ncommand = \"echo hi\"\n"
+	n := testNest(t, user, "", "")
+	c, err := Load(n, FlagOverrides{})
+	if err != nil {
+		t.Fatalf("unknown hook event crashed the load: %v", err)
+	}
+	if len(c.Hooks()) != 0 {
+		t.Fatal("an unknown-event hook must not be built")
+	}
+	if len(c.Warnings()) == 0 || !strings.Contains(strings.Join(c.Warnings(), " "), "Nonsense") {
+		t.Errorf("expected a warning naming the event, got %v", c.Warnings())
+	}
+}
+
+func TestBadHookWarnsNotCrashes(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "sk-test")
+	// An empty command is a build error the loader must degrade to a warning.
+	user := "[[hooks.PreToolUse]]\nmatcher = \"sh\"\n"
+	n := testNest(t, user, "", "")
+	c, err := Load(n, FlagOverrides{})
+	if err != nil {
+		t.Fatalf("bad hook crashed the load: %v", err)
+	}
+	if len(c.Hooks()) != 0 {
+		t.Fatal("a hook that fails to build must not be kept")
+	}
+	if len(c.Warnings()) == 0 {
+		t.Error("expected a warning for the bad hook")
+	}
+}
+
 func TestMissingEnvForReferencedProvider(t *testing.T) {
 	if old, had := os.LookupEnv("ANTHROPIC_API_KEY"); had {
 		if err := os.Unsetenv("ANTHROPIC_API_KEY"); err != nil {

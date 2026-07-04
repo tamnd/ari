@@ -15,6 +15,7 @@ import (
 	"github.com/tamnd/ari/agent"
 	"github.com/tamnd/ari/core"
 	"github.com/tamnd/ari/event"
+	"github.com/tamnd/ari/hook"
 	"github.com/tamnd/ari/kernel/ledger"
 	"github.com/tamnd/ari/lsp"
 	"github.com/tamnd/ari/memory"
@@ -49,6 +50,8 @@ type Runner struct {
 	nest     nest.Nest
 	asks     Asker
 	lsp      *lsp.Service
+	hooks    []hook.Command
+	trust    *hook.TrustStore
 	headless bool
 	bound    bool
 
@@ -99,6 +102,12 @@ func (r *Runner) Bind(c *core.Colony) {
 	// once here and shared by every worker, so the colony runs one gopls per
 	// module, not one per session (doc 04 section 6).
 	r.lsp = lsp.New(lsp.Options{Enabled: r.config.lspEnabled, Root: r.nest.Root})
+	// Hooks are parsed once at bind and their workspace trust is read from the
+	// global nest, so every worker shares one trust view. A missing or corrupt
+	// trust file loads as untrusted, so the gate fails closed (doc 05 section
+	// 12, D16).
+	r.hooks = cfg.Hooks()
+	r.trust = hook.LoadTrust(r.nest.TrustFile())
 	r.bound = true
 }
 
@@ -262,7 +271,60 @@ func (r *Runner) wake(ctx context.Context, t *core.TurnHandle) (*worker, error) 
 		Session: string(t.Session),
 		Tier:    string(card.Tier),
 	}
+
+	// Hooks reach the loop through a bridge only when a hook could actually
+	// fire: the workspace trust gate decides whether the repo's own hooks
+	// count, and a session with nothing to run keeps the seam nil so the loop
+	// pays nothing (doc 05 section 12).
+	hr := hook.NewRunner(hook.Options{
+		Commands:   r.hooks,
+		Trusted:    r.trust.IsTrusted(r.nest.Root),
+		ProjectDir: r.nest.Root,
+		Session:    string(t.Session),
+	})
+	if hr.Any() {
+		w.loop.Hooks = &hookBridge{runner: hr, session: string(t.Session), cwd: r.nest.Root}
+	}
 	return w, nil
+}
+
+// hookBridge adapts the hook dispatcher to the loop's agent.Hooks seam, so the
+// agent package never imports hook. It maps a tool call to a hook.Payload,
+// fires the event, and folds the outcome back into the loop's small result.
+type hookBridge struct {
+	runner  *hook.Runner
+	session string
+	cwd     string
+}
+
+// PreTool fires the pre-tool hooks before the permission decision. A block
+// carries the joined block message back to the model.
+func (b *hookBridge) PreTool(ctx context.Context, toolName string, input json.RawMessage) agent.HookResult {
+	out := b.runner.Fire(ctx, hook.PreToolUse, hook.Payload{
+		Tool:    toolName,
+		Input:   input,
+		Session: b.session,
+		Cwd:     b.cwd,
+	})
+	return agent.HookResult{Block: out.Block, Message: out.Message, Context: out.Context}
+}
+
+// PostTool fires the post-tool hooks after the tool returns. A failed call
+// routes to the post-tool-failure event so a hook can distinguish the two.
+func (b *hookBridge) PostTool(ctx context.Context, toolName string, input json.RawMessage, result string, isErr bool) agent.HookResult {
+	ev := hook.PostToolUse
+	if isErr {
+		ev = hook.PostToolUseFailure
+	}
+	out := b.runner.Fire(ctx, ev, hook.Payload{
+		Tool:    toolName,
+		Input:   input,
+		Result:  result,
+		IsError: isErr,
+		Session: b.session,
+		Cwd:     b.cwd,
+	})
+	return agent.HookResult{Block: out.Block, Message: out.Message, Context: out.Context}
 }
 
 // blockTwoContext gathers the session-stable inputs for block two: the

@@ -94,6 +94,11 @@ func (n Nest) GlobalConfig() string { return filepath.Join(n.Global, "config.tom
 // AuthDir holds provider credentials, 0600, never in model context.
 func (n Nest) AuthDir() string { return filepath.Join(n.Global, "auth") }
 
+// TrustFile holds the per-workspace hook trust decisions, keyed by workspace
+// root path. It lives in the global nest so trust is remembered across
+// sessions and is never committed into a repo (doc 05 section 12, D16).
+func (n Nest) TrustFile() string { return filepath.Join(n.Global, "trust.json") }
+
 // ProjectStateDir is this project's per-user state under the global nest:
 // sessions, the colony database, the journal. It lives here and not in
 // the repo so nothing tempts anyone to commit it.

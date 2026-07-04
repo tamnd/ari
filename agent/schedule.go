@@ -240,6 +240,17 @@ func (l *Loop) runOne(ctx context.Context, i int, results []toolOutcome, serial 
 		}
 	}
 
+	if l.Hooks != nil {
+		if hr := l.Hooks.PreTool(ctx, c.Name, args); hr.Block {
+			msg := hr.Message
+			if msg == "" {
+				msg = "a hook blocked this call"
+			}
+			fail(msg + "; do not retry the same call, adjust or ask the user")
+			return
+		}
+	}
+
 	var onProgress tool.ProgressFunc
 	if serial {
 		onProgress = func(chunk string) {
@@ -275,6 +286,22 @@ func (l *Loop) runOne(ctx context.Context, i int, results []toolOutcome, serial 
 	r.spilled = ref.Path
 	r.effect = res.StateEffect
 	r.display = displayString(res, content)
+
+	if l.Hooks != nil {
+		hr := l.Hooks.PostTool(ctx, c.Name, args, content, false)
+		switch {
+		case hr.Block:
+			// A post-tool block turns the successful call into an error the
+			// model must reckon with; the file effect still stands because the
+			// tool already ran.
+			r.isErr = true
+			if hr.Message != "" {
+				r.content = content + "\n\n" + hr.Message
+			}
+		case hr.Context != "":
+			r.content = content + "\n\n" + hr.Context
+		}
+	}
 }
 
 // applyEffect folds a file-state effect in and tracks read recency for
