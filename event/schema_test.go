@@ -50,6 +50,7 @@ var payloadFor = map[Type]any{
 	TypeWorkerFinished:      WorkerFinished{},
 	TypeColonyProgress:      ColonyProgress{},
 	TypeQuestionUnresolved:  QuestionUnresolved{},
+	TypeWorktreeReconciled:  WorktreeReconciled{},
 	TypeWorktreeConflict:    WorktreeConflict{},
 	TypeArbitrationOpened:   ArbitrationOpened{},
 	TypeArbitrationClosed:   ArbitrationClosed{},

@@ -68,6 +68,7 @@ const (
 	TypeWorkerFinished     Type = "colony.worker.finished"
 	TypeColonyProgress     Type = "colony.progress"
 	TypeQuestionUnresolved Type = "colony.question.unresolved"
+	TypeWorktreeReconciled Type = "colony.worktree.reconciled"
 	TypeWorktreeConflict   Type = "colony.worktree.conflict"
 	TypeArbitrationOpened  Type = "colony.arbitration.opened"
 	TypeArbitrationClosed  Type = "colony.arbitration.closed"

@@ -95,10 +95,16 @@ func (r *Runner) fanOut(ctx context.Context, t *core.TurnHandle, brief colony.Ta
 	if err != nil {
 		r.logDebug(t, "fan-out dispatch: "+err.Error())
 	}
-	if len(res.Findings) == 0 {
-		return ""
+	// A read-only survey preface grounds the foreground answer in the findings;
+	// a writer fan-out has no findings but a reconcile result, which lands its
+	// combined patch behind the D15 gate and tells the foreground what changed.
+	// A plan can carry both, so they concatenate rather than one winning.
+	var preface string
+	if len(res.Findings) > 0 {
+		preface = renderFindingsPreface(res.Findings)
 	}
-	return renderFindingsPreface(res.Findings)
+	preface += r.landReconcile(ctx, t, res.Reconcile)
+	return preface
 }
 
 // renderFindingsPreface turns the surveys' findings into the block-three
