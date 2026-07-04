@@ -22,6 +22,7 @@ import (
 	"github.com/tamnd/ari/permission"
 	"github.com/tamnd/ari/provider"
 	"github.com/tamnd/ari/session"
+	"github.com/tamnd/ari/skill"
 	"github.com/tamnd/ari/tool"
 )
 
@@ -232,7 +233,7 @@ func (r *Runner) wake(ctx context.Context, t *core.TurnHandle) (*worker, error) 
 			Platform: runtime.GOOS + "/" + runtime.GOARCH,
 			Model:    primary.Model,
 		}),
-		Prefix:  []provider.Message{BlockTwo(r.blockTwoContext(ctx, card))},
+		Prefix:  []provider.Message{BlockTwo(r.blockTwoContext(ctx, card, primary.Provider.Caps().MaxContext))},
 		Tools:   reg,
 		TC:      tc,
 		Decide:  w.decide,
@@ -246,7 +247,7 @@ func (r *Runner) wake(ctx context.Context, t *core.TurnHandle) (*worker, error) 
 // blockTwoContext gathers the session-stable inputs for block two: the
 // pinned index from the memory seam when one is wired, ARI.md, and git
 // status at session start (doc 03 section 8).
-func (r *Runner) blockTwoContext(ctx context.Context, card Card) Context {
+func (r *Runner) blockTwoContext(ctx context.Context, card Card, window int) Context {
 	var c Context
 	if r.Memory != nil {
 		if idx, err := r.Memory.PinnedIndex(ctx, card.State.Namespace); err == nil {
@@ -264,12 +265,34 @@ func (r *Runner) blockTwoContext(ctx context.Context, card Card) Context {
 		Root:      r.nest.Root,
 		GlobalDir: r.nest.Global,
 	})
+	// Skills and slash commands are discovered from the three layers, their
+	// frontmatter read but their bodies left on disk until invoked. Only the
+	// name-plus-one-line listing rides block two, capped to a slice of the
+	// window so a big skill directory cannot crowd out the conversation (doc
+	// 13 section 2.5). Bodies arrive at invocation, the next slice.
+	c.Skills = r.skillListing(cwd, window)
 	status := r.GitStatus
 	if status == nil {
 		status = gitStatus
 	}
 	c.GitStatus = status(r.nest.Root)
 	return c
+}
+
+// skillListing discovers the installed skills and renders the budgeted
+// listing block two carries. A discovery warning is surfaced through the
+// event stream elsewhere; here a broken skill simply does not list.
+func (r *Runner) skillListing(cwd string, window int) string {
+	found, _ := skill.Discover(skill.Options{
+		Root:      r.nest.Root,
+		Cwd:       cwd,
+		GlobalDir: r.nest.Global,
+	})
+	if len(found) == 0 {
+		return ""
+	}
+	block, _ := skill.RenderList(found, skill.Budget(window), estimateTokens)
+	return block
 }
 
 // gitStatus is the default git probe: branch plus porcelain entries,
