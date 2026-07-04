@@ -8,7 +8,6 @@ import (
 
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/tamnd/ari/lsp"
 	"github.com/tamnd/ari/tool"
 	"github.com/tamnd/ari/ui/diff"
 	"github.com/tamnd/ari/ui/markdown"
@@ -177,7 +176,7 @@ func (writeRenderer) Render(p Part, width int, th theme.Theme) Block {
 // edit under the content, one red line each with its 1-based position, so
 // the same errors the model reads in its result are visible to the human
 // watching. Nothing when the file came back clean.
-func diagnosticLines(ds []lsp.Diagnostic, width int, th theme.Theme) Block {
+func diagnosticLines(ds []tool.Diagnostic, width int, th theme.Theme) Block {
 	var b Block
 	for _, d := range ds {
 		line := fmt.Sprintf("%s [%d:%d] %s", strings.ToUpper(d.Severity), d.Line, d.Col, d.Message)

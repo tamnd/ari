@@ -75,6 +75,13 @@ type ToolContext struct {
 	Now func() time.Time
 }
 
+// Diagnostic re-exports the language-server finding type so the typed tool
+// displays carry diagnostics without the UI having to import the lsp
+// package: the import-graph guard lets the UI reach the core only through
+// event and tool (doc 02 section 1). It is an alias, so a value flows
+// between tool and lsp with no conversion.
+type Diagnostic = lsp.Diagnostic
+
 // projectDiagnoser is the optional half of the LSP seam write reaches for
 // when it looks outward: the whole set of other-file diagnostics after a
 // whole-file overwrite. The lsp Service satisfies it; a client that does

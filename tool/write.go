@@ -28,7 +28,7 @@ type WriteDisplay struct {
 	Path        string
 	Content     string
 	Created     bool
-	Diagnostics []lsp.Diagnostic
+	Diagnostics []Diagnostic
 }
 
 // writeTool creates a new file or overwrites an existing one whole. It

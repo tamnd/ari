@@ -30,7 +30,7 @@ type editArgs struct {
 type EditDisplay struct {
 	Path        string
 	Diff        string
-	Diagnostics []lsp.Diagnostic
+	Diagnostics []Diagnostic
 }
 
 // editTool replaces an exact, unique old string with a new string,
