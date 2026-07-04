@@ -34,6 +34,9 @@ func (s *spyTrails) Sample(context.Context, string, TaskClass) (float64, error) 
 func (s *spyTrails) Load(context.Context, string, TaskClass) (Trail, error) {
 	return Trail{}, nil
 }
+func (s *spyTrails) MeanTokens(context.Context, TaskClass) (int64, bool, error) {
+	return 0, false, nil
+}
 
 func row(id string, classes []TaskClass, tools []string, vec []float32) CardRow {
 	return CardRow{ID: id, Status: StatusActive, Tier: TierFrontier, Classes: classes, Tools: tools, SkillVec: vec}
