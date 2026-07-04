@@ -9,6 +9,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/tamnd/ari/tool"
+	"github.com/tamnd/ari/ui/diff"
 	"github.com/tamnd/ari/ui/markdown"
 	"github.com/tamnd/ari/ui/theme"
 )
@@ -171,10 +172,10 @@ func (writeRenderer) Render(p Part, width int, th theme.Theme) Block {
 	return b
 }
 
-// editRenderer: the real diff, line-colored from the theme's diff
-// styles. Intra-line emphasis and syntax layering arrive with ui/diff
-// in the dialog slice; the chat result shows the same unified text the
-// permission prompt approved.
+// editRenderer: the real diff, through the shared ui/diff renderer, so
+// the chat result shows exactly what the permission prompt approved with
+// no second code path (plan 02 slice 2). Line numbers, gutters, chroma
+// coloring, and intra-line word emphasis all come from that one package.
 type editRenderer struct{}
 
 func (editRenderer) Render(p Part, width int, th theme.Theme) Block {
@@ -183,28 +184,11 @@ func (editRenderer) Render(p Part, width int, th theme.Theme) Block {
 		return fallbackRenderer{}.Render(p, width, th)
 	}
 	b := Block{fit(th.S.Info.Render("edited "+d.Path), width)}
-	return append(b, DiffLines(d.Diff, width, th.S.Diff)...)
-}
-
-// DiffLines colors a unified diff with the theme's diff styles. Shared
-// by the edit result here and, later, the permission prompt.
-func DiffLines(diff string, width int, st theme.DiffStyle) Block {
-	var b Block
-	for l := range strings.SplitSeq(strings.TrimRight(diff, "\n"), "\n") {
-		var styled string
-		switch {
-		case strings.HasPrefix(l, "@@"):
-			styled = st.Header.Render(l)
-		case strings.HasPrefix(l, "+++"), strings.HasPrefix(l, "---"):
-			styled = st.LineNo.Render(l)
-		case strings.HasPrefix(l, "+"):
-			styled = st.Add.Render(l)
-		case strings.HasPrefix(l, "-"):
-			styled = st.Del.Render(l)
-		default:
-			styled = st.Context.Render(l)
-		}
-		b = append(b, ansi.Truncate(styled, width, "…"))
+	// diff.Render keeps its own minimum width so a diff never collapses to
+	// nonsense; the chat block still has to fit whatever width it is given,
+	// so clip each line back to that width here.
+	for _, l := range diff.Render(d.Diff, width, th, diff.Auto) {
+		b = append(b, ansi.Truncate(l, width, "…"))
 	}
 	return b
 }
