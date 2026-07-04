@@ -8,6 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+
+	"github.com/tamnd/ari/lsp"
 )
 
 // writeMaxResult is small on purpose: the model-facing result is a
@@ -20,12 +22,13 @@ type writeArgs struct {
 }
 
 // WriteDisplay is the typed data the UI renders for a write: the whole
-// new content plus whether the file is new, so the permission dialog
-// can show old versus new. Never sent to the model.
+// new content, whether the file is new, and any diagnostics the language
+// server reported for the written file. Never sent to the model.
 type WriteDisplay struct {
-	Path    string
-	Content string
-	Created bool
+	Path        string
+	Content     string
+	Created     bool
+	Diagnostics []Diagnostic
 }
 
 // writeTool creates a new file or overwrites an existing one whole. It
@@ -141,9 +144,17 @@ func (w writeTool) Call(ctx context.Context, raw json.RawMessage, tc *ToolContex
 		// trip the staleness check on the file it just wrote.
 		tc.Files.Set(path, hash, info.ModTime(), lines)
 	}
+	// A whole-file overwrite is the change likeliest to break a caller
+	// elsewhere, so write pays the extra cost of looking outward: it does a
+	// full sync of its own file, then pulls capped project-wide diagnostics
+	// for the files that newly went red (doc 04 section 6).
+	own := diagnose(ctx, tc, path, lsp.TouchFull)
+	model := appendDiagnostics(fmt.Sprintf("wrote %s (%d lines)", path, lines), path, own)
+	model = appendProjectDiagnostics(model, projectDiagnostics(tc, path))
+
 	return &Result{
-		Model:       fmt.Sprintf("wrote %s (%d lines)", path, lines),
-		Display:     WriteDisplay{Path: path, Content: a.Content, Created: created},
+		Model:       model,
+		Display:     WriteDisplay{Path: path, Content: a.Content, Created: created, Diagnostics: own},
 		StateEffect: &FileStateEffect{Path: path, Hash: hash, Mtime: info.ModTime(), Lines: lines},
 	}, nil
 }

@@ -25,19 +25,28 @@ type FileChange struct {
 	Added, Removed int
 }
 
+// ServerDiag is one language server's live diagnostic tally, projected
+// from the LSP service status so the human sees the same error count the
+// model is being handed (doc 04 section 13.1).
+type ServerDiag struct {
+	Name             string
+	Errors, Warnings int
+}
+
 // State is everything the sidebar shows. The root updates it from
 // events; the sidebar only renders it.
 type State struct {
-	Cwd        string
-	Model      string
-	Provider   string
-	Effort     string  // reasoning effort, empty when unset
-	ContextPct float64 // 0..1 context window fill, from the ledger
-	CostUSD    float64 // running session cost, from the ledger
-	Files      []FileChange
-	Colony     string // one line at M0: the single ant's state
-	Drops      uint64 // bus drop counter (lossy lane)
-	Debug      bool   // drops show only when toggled on
+	Cwd         string
+	Model       string
+	Provider    string
+	Effort      string  // reasoning effort, empty when unset
+	ContextPct  float64 // 0..1 context window fill, from the ledger
+	CostUSD     float64 // running session cost, from the ledger
+	Files       []FileChange
+	Colony      string       // one line at M0: the single ant's state
+	Diagnostics []ServerDiag // per-server error and warning counts
+	Drops       uint64       // bus drop counter (lossy lane)
+	Debug       bool         // drops show only when toggled on
 }
 
 // Sidebar renders State into its column.
@@ -96,6 +105,22 @@ func (s *Sidebar) render(width, height int) []string {
 		colony = "one ant, awake"
 	}
 	out = append(out, fit(th.Info.Render("◆ "+colony)), "")
+
+	// Language servers, one line each with their live tally, so a build
+	// going red shows here the moment an edit reports it.
+	if len(s.st.Diagnostics) > 0 {
+		out = append(out, fit(th.Subtle.Render("language servers")))
+		for _, d := range s.st.Diagnostics {
+			tally := th.Success.Render("clean")
+			if d.Errors > 0 || d.Warnings > 0 {
+				tally = th.Error.Render(fmt.Sprintf("%d err", d.Errors)) + " " +
+					th.Muted.Render(fmt.Sprintf("%d warn", d.Warnings))
+			}
+			pad := max(width-ansi.StringWidth(d.Name)-ansi.StringWidth(tally), 1)
+			out = append(out, fit(th.Base.Render(d.Name)+fmt.Sprintf("%*s", pad, "")+tally))
+		}
+		out = append(out, "")
+	}
 
 	// The file list takes whatever room is left, minus the debug line.
 	tail := 0

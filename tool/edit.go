@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+
+	"github.com/tamnd/ari/lsp"
 )
 
 // editMaxResult holds a diff preview big enough for the model to
@@ -22,10 +24,13 @@ type editArgs struct {
 }
 
 // EditDisplay is the typed data the UI renders for an edit: a real
-// unified diff, syntax-highlighted by the TUI. Never sent to the model.
+// unified diff, syntax-highlighted by the TUI, plus any diagnostics the
+// language server reported for the edited file, shown under the diff.
+// Never sent to the model.
 type EditDisplay struct {
-	Path string
-	Diff string
+	Path        string
+	Diff        string
+	Diagnostics []Diagnostic
 }
 
 // editTool replaces an exact, unique old string with a new string,
@@ -164,9 +169,17 @@ func (e editTool) Call(ctx context.Context, raw json.RawMessage, tc *ToolContext
 	if a.ReplaceAll && n > 1 {
 		model = fmt.Sprintf("edited %s (%d occurrences)", path, n)
 	}
+
+	// The self-correcting loop: touch the file the server just saw change
+	// and fold any errors into the result, so the next turn knows exactly
+	// where the edit broke rather than guessing whether it compiled (doc
+	// 04 section 6). An edit is a surgical change, so it reports its own
+	// file, not the project.
+	diags := diagnose(ctx, tc, path, lsp.TouchDocument)
+
 	return &Result{
-		Model:       model,
-		Display:     EditDisplay{Path: path, Diff: UnifiedDiff(path, cur, next)},
+		Model:       appendDiagnostics(model, path, diags),
+		Display:     EditDisplay{Path: path, Diff: UnifiedDiff(path, cur, next), Diagnostics: diags},
 		StateEffect: &FileStateEffect{Path: path, Hash: hash, Mtime: after.ModTime(), Lines: lines},
 	}, nil
 }

@@ -73,6 +73,18 @@ var fixture = []struct {
 		Result: tool.EditDisplay{Path: "config/loader.go",
 			Diff: "--- a/config/loader.go\n+++ b/config/loader.go\n@@ -1,3 +1,3 @@\n package config\n-func LoadCfg() {}\n+func Load() {}\n"},
 	}},
+	{"edit_diagnostics", Part{
+		Kind: KindToolResult, Role: RoleTool, Tool: "edit", OK: true,
+		Result: tool.EditDisplay{Path: "config/loader.go",
+			Diff:        "--- a/config/loader.go\n+++ b/config/loader.go\n@@ -1,3 +1,3 @@\n package config\n-var n int = 0\n+var n int = \"x\"\n",
+			Diagnostics: []tool.Diagnostic{{Line: 2, Col: 5, Severity: "error", Message: "cannot use \"x\" as int value"}}},
+	}},
+	{"write_diagnostics", Part{
+		Kind: KindToolResult, Role: RoleTool, Tool: "write", OK: true,
+		Result: tool.WriteDisplay{Path: "config/loader.go",
+			Content:     "package config\n\nvar n int = \"x\"\n",
+			Diagnostics: []tool.Diagnostic{{Line: 3, Col: 5, Severity: "error", Message: "cannot use \"x\" as int value"}}},
+	}},
 	{"sh_ok", Part{
 		Kind: KindToolResult, Role: RoleTool, Tool: "sh", OK: true,
 		Result: tool.ShDisplay{Command: "go test ./config/", Output: "ok  \tari/config\t0.31s\n"},
@@ -169,6 +181,25 @@ func TestRenderNarrow(t *testing.T) {
 					t.Errorf("%s width %d line %d: %d cells wide: %q", tc.name, w, i, got, line)
 				}
 			}
+		}
+	}
+}
+
+// TestDiagnosticsRenderUnderChange: the language server's finding shows
+// under an edit's diff and a write's content, so the human sees the same
+// error the model was handed.
+func TestDiagnosticsRenderUnderChange(t *testing.T) {
+	th := theme.Dark()
+	for _, name := range []string{"edit_diagnostics", "write_diagnostics"} {
+		var p Part
+		for _, f := range fixture {
+			if f.name == name {
+				p = f.p
+			}
+		}
+		out := strings.Join(Render(p, 60, th), "\n")
+		if !strings.Contains(out, "ERROR [") || !strings.Contains(out, "cannot use") {
+			t.Errorf("%s did not render the diagnostic under the change:\n%s", name, out)
 		}
 	}
 }

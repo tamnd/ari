@@ -120,6 +120,13 @@ func (readTool) Call(ctx context.Context, raw json.RawMessage, tc *ToolContext, 
 		return nil, fmt.Errorf("%s is a binary file (%d bytes); read cannot display it", path, info.Size())
 	}
 
+	// The file is real text the model is about to reason over, so warm the
+	// language server in the background now: the edit that usually follows a
+	// read then finds a server that has already parsed the file (doc 04
+	// section 6). This runs even for an unchanged re-read, since the server
+	// may have been spawned since.
+	warm(tc, path)
+
 	hash := HashBytes(content)
 	lines := splitLines(content)
 

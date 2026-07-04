@@ -105,6 +105,29 @@ func TestLongPathsShortened(t *testing.T) {
 	}
 }
 
+// TestDiagnosticCountsShown: a language server with errors renders its
+// name and tally; a clean one reads clean.
+func TestDiagnosticCountsShown(t *testing.T) {
+	st := full
+	st.Diagnostics = []ServerDiag{
+		{Name: "gopls", Errors: 2, Warnings: 1},
+		{Name: "pyright", Errors: 0, Warnings: 0},
+	}
+	out := frame(st, Width, 24)
+	for _, want := range []string{"language servers", "gopls", "2 err", "1 warn", "pyright", "clean"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("panel missing %q:\n%s", want, out)
+		}
+	}
+}
+
+// TestNoDiagnosticSectionWhenEmpty: no servers, no section.
+func TestNoDiagnosticSectionWhenEmpty(t *testing.T) {
+	if strings.Contains(frame(full, Width, 24), "language servers") {
+		t.Error("language servers section shown with no servers")
+	}
+}
+
 // TestInBounds at the layout width and when squeezed narrower.
 func TestInBounds(t *testing.T) {
 	s := New(theme.Dark())
