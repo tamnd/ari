@@ -78,6 +78,8 @@ type Runner struct {
 	cards     colony.CardStore
 	board     colony.Blackboard
 	worktrees *colony.Worktrees
+	intake    *colony.Intake
+	emit      func(typ event.Type, session, turn string, payload any) error
 
 	// builtins registers the starting population once, on the first turn
 	// after the colony.db migration has run. Construction at Bind is pure;
@@ -153,12 +155,27 @@ func (r *Runner) Bind(c *core.Colony) {
 	// to colony's structural Embedder; a null embedder routes on class and
 	// signal prefilters alone.
 	db := c.Memory()
-	r.cards = colony.NewCardStore(db, r.nest.AntsDir(), core.BuildEmbedder(cfg))
-	r.queen = colony.NewQueen(r.cards)
+	emb := core.BuildEmbedder(cfg)
+	r.cards = colony.NewCardStore(db, r.nest.AntsDir(), emb)
+	// The trail store shares the one colony.db and seeds its sampler from the
+	// clock; the queen reads it for the Thompson draw when a class has more
+	// than one eligible ant. A nil rng lets both seed themselves.
+	trails := colony.NewTrailStore(db, trailHalfLifeDays, time.Now, nil)
+	r.queen = colony.NewQueen(r.cards).WithRouting(trails, colony.DefaultRouteConfig(), nil)
 	r.board = colony.NewBlackboard(db, time.Now)
 	r.worktrees = colony.NewWorktrees(r.nest.Root, r.nest.ProjectStateDir(), gitRunner{})
+	// Intake turns a foreground request into a brief. The model-tier
+	// classifier is nil, so the rule stage settles a coding request without a
+	// model call; the resolver checks anchors against the repo root.
+	r.intake = colony.NewIntake("queen", emb, nil, colony.DirResolver(r.nest.Root), time.Now)
+	r.emit = c.Emit
 	r.bound = true
 }
+
+// trailHalfLifeDays is the evaporation clock the trail store decays fitness
+// on. It matches the memory store's recency half-life so the two cannot skew
+// (colony trail.go, doc 06 section 4).
+const trailHalfLifeDays = 30
 
 // ensureBuiltins registers the colony's starting population exactly once,
 // after Start has migrated colony.db. It is idempotent through Upsert, so a
@@ -271,12 +288,56 @@ func (r *Runner) Headless() {
 // RunTurn implements core.TurnRunner: it wakes or finds the session's
 // worker and drives one turn through the loop.
 func (r *Runner) RunTurn(ctx context.Context, t *core.TurnHandle) error {
+	// The queen routes the request to an ant and publishes the decision. It is
+	// advisory in M3's single-worker path: the decision is auditable on the
+	// stream, but dispatch still wakes the one session worker below. The slice
+	// that fans out reads this same assignment to decide single versus split.
+	r.route(ctx, t)
 	w, err := r.workerFor(ctx, t)
 	if err != nil {
 		return err
 	}
 	return w.runTurn(ctx, t)
 }
+
+// route runs the intake-then-queen decision for one turn and emits
+// route.decided. It is best-effort: a routing failure is logged, never
+// fatal, because the single worker carries the turn regardless in M3. An
+// empty request has no goal to classify and is skipped.
+func (r *Runner) route(ctx context.Context, t *core.TurnHandle) {
+	if strings.TrimSpace(t.Request.Text) == "" {
+		return
+	}
+	if err := r.ensureBuiltins(ctx); err != nil {
+		r.logDebug(t, "registering builtins: "+err.Error())
+		return
+	}
+	brief, err := r.intake.Foreground(ctx, string(t.Session), string(t.Turn), t.Request.Text, foregroundBudget)
+	if err != nil {
+		r.logDebug(t, "intake: "+err.Error())
+		return
+	}
+	a, err := r.queen.Assign(ctx, brief)
+	if err != nil {
+		r.logDebug(t, "routing: "+err.Error())
+		return
+	}
+	_ = r.emit(event.TypeRouteDecided, string(t.Session), string(t.Turn), event.RouteDecided{
+		Task: brief.TaskID,
+		Ant:  a.Ant,
+		Why:  a.Reason.Summary,
+	})
+}
+
+// logDebug puts a diagnostic line on the stream for a non-fatal colony hiccup.
+func (r *Runner) logDebug(t *core.TurnHandle, text string) {
+	_ = r.emit(event.TypeLog, string(t.Session), string(t.Turn), event.Log{Level: "debug", Text: text})
+}
+
+// foregroundBudget is the token allowance a foreground turn carries onto its
+// brief. It is generous because the worker owns the whole session context
+// window; a later budget slice ties it to the ledger's remaining envelope.
+var foregroundBudget = colony.Budget{Tokens: 200000}
 
 func (r *Runner) workerFor(ctx context.Context, t *core.TurnHandle) (*worker, error) {
 	r.mu.Lock()

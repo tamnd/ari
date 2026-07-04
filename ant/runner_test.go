@@ -326,6 +326,46 @@ func TestBindStandsUpColony(t *testing.T) {
 	}
 }
 
+// TestRouteDecidedNamesTheWorker proves the third seam of the M3
+// integration: a foreground request runs through intake and the queen, and
+// the routing decision lands on the stream as route.decided. An edit request
+// classifies by rule and routes to the sole general worker, so the M0 path
+// and the queen agree on who runs it. The decision is emitted before the
+// worker streams, so the scripted provider needs no responses.
+func TestRouteDecidedNamesTheWorker(t *testing.T) {
+	root := t.TempDir()
+	c := openWorkerColony(t, root, scripted.New(), nil)
+	ctx := context.Background()
+	sub, err := c.Events(ctx, core.EventFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sid, err := c.NewSession(ctx, core.NewSessionRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Submit(ctx, core.SubmitRequest{
+		Session: sid,
+		Text:    "add the new marker to hello.txt",
+		Mode:    core.ModeFullAuto,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	evs := collect(t, sub, event.TypeRouteDecided)
+
+	last := evs[len(evs)-1]
+	var rd event.RouteDecided
+	if err := json.Unmarshal(last.Payload, &rd); err != nil {
+		t.Fatal(err)
+	}
+	if rd.Ant != colony.WorkerCard().ID {
+		t.Errorf("routed to %q, want the worker %q", rd.Ant, colony.WorkerCard().ID)
+	}
+	if rd.Why == "" {
+		t.Error("route.decided carries no why")
+	}
+}
+
 // TestPromptPrefixStableAcrossTurns is the D14 cache-alignment test at
 // the session level: across ten turns of one session, the system blocks,
 // the tool definitions, and the block-two message serialize identically;
