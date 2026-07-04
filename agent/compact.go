@@ -25,27 +25,102 @@ const summarySystem = "You compress agent transcripts. Write a dense summary tha
 const summaryAsk = "Summarize the conversation above per your instructions. " +
 	"Reply with only the summary."
 
-// compact is the ladder, cheapest rung first (doc 03 section 11).
-// Rung one clears old tool results with no model call; rung two (old
-// thinking) is a no-op in M0 because thinking never re-enters the
-// context; rung three summarizes and moves the boundary.
+// compactRung names one step of the ladder, so the order on the page is
+// the order at runtime and the journal shows which rung fired (D6).
+type compactRung int
+
+const (
+	rungSnip         compactRung = iota // drop pre-boundary history, free memory
+	rungMicrocompact                    // trim old tool results, no model call
+	rungBreaker                         // circuit breaker, surface instead of loop
+	rungSummarize                       // text-only single-turn summary
+)
+
+func (r compactRung) String() string {
+	switch r {
+	case rungSnip:
+		return "snip"
+	case rungMicrocompact:
+		return "microcompact"
+	case rungBreaker:
+		return "circuit-breaker"
+	default:
+		return "summarize"
+	}
+}
+
+// compact climbs the ladder cheapest-first and stops at the first rung
+// that leaves the live window under the target. Each rung is named and
+// runs in page order, so there is no hidden recursion; the spiral guards
+// live in State, not here (doc 03 section 11, D6).
+//
+// Rung one is a snip that drops the history before the last compaction
+// boundary. The model never sees that history (buildRequest slices every
+// request at boundaryIdx), so in ari the snip reclaims retained memory in
+// a long session rather than live tokens; it is the cheapest rung, always
+// safe, and so runs first and unconditionally. Rung two is a microcompact
+// that trims old tool results to a marker with no model call, and short-
+// circuits the ladder when that alone drops the window under target. Rung
+// three summarizes and moves the boundary, guarded by the circuit breaker.
 func (l *Loop) compact(ctx context.Context, st *State) {
 	pre := l.liveTokens(st)
-	if l.clearOldToolResults(st) && l.liveTokens(st) < l.Limits.thresholds().AutoCompact {
+	target := l.Limits.thresholds().AutoCompact
+
+	if n := l.snip(st); n > 0 {
+		l.emit(event.TypeLog, event.Log{
+			Level: "debug",
+			Text:  fmt.Sprintf("compaction rung %s: dropped %d pre-boundary messages", rungSnip, n),
+		})
+	}
+
+	if l.microcompact(st) && l.liveTokens(st) < target {
 		st.compactedThisTurn = true
 		l.emit(event.TypeLog, event.Log{
 			Level: "debug",
-			Text:  fmt.Sprintf("compaction rung one: cleared old tool results, %d tokens to %d", pre, l.liveTokens(st)),
+			Text:  fmt.Sprintf("compaction rung %s: %d tokens to %d, no summary needed", rungMicrocompact, pre, l.liveTokens(st)),
 		})
 		st.next = transAssemble
 		return
 	}
+
+	// Spiral guard: if summarize has already failed the cap in a row, do
+	// not climb to it again and burn another call; surface the problem
+	// instead of looping (research A.7 lesson C4).
+	if st.consecCompactFail >= maxConsecutiveCompactFail {
+		l.emit(event.TypeLog, event.Log{
+			Level: "warn",
+			Text:  fmt.Sprintf("compaction rung %s: %d consecutive summarize failures, surfacing", rungBreaker, st.consecCompactFail),
+		})
+		l.openCircuit(st)
+		return
+	}
+
 	l.summarize(ctx, st, pre)
 }
 
-// clearOldToolResults replaces every tool_result but the most recent
-// few with a placeholder. Reports whether anything was cleared.
-func (l *Loop) clearOldToolResults(st *State) bool {
+// snip is rung one: it drops the history before the last compaction
+// boundary from the retained slice and re-bases the boundary to zero.
+// The model already never saw that history, so this reclaims memory in a
+// long session without touching the live window. Returns how many
+// messages it dropped. A fresh backing array is allocated on purpose so
+// the snipped tail no longer pins the old history in memory.
+func (l *Loop) snip(st *State) int {
+	if st.boundaryIdx <= 0 {
+		return 0
+	}
+	n := st.boundaryIdx
+	st.msgs = append([]provider.Message{}, st.msgs[st.boundaryIdx:]...)
+	st.boundaryIdx = 0
+	return n
+}
+
+// microcompact is rung two: it replaces every tool_result but the most
+// recent few with a placeholder, reclaiming their bytes with no model
+// call. Reports whether anything was cleared. This is the time-based
+// flavor that ships in M1; the cache-aware flavor that trims while
+// preserving the cached prefix (D14) is designed but gated behind a
+// provider capability ari does not yet advertise (doc 03 section 11).
+func (l *Loop) microcompact(st *State) bool {
 	type pos struct{ msg, block int }
 	var spots []pos
 	for mi := st.boundaryIdx; mi < len(st.msgs); mi++ {

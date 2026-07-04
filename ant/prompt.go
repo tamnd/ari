@@ -39,7 +39,9 @@ Probe before you mutate. Read before you edit, look before you delete, and check
 
 Keep output tight. Lead with the answer, follow with only the detail that changes what the reader does next. Do not restate file contents, do not narrate each tool call, and do not apologize for or hedge a result you verified. When a command fails, read the error before retrying; the same command rarely deserves a second identical run.
 
-A tool result that reports an error is yours to fix: adjust the input and continue. Give up only when the error names something outside your reach, and say plainly what is missing.`
+A tool result that reports an error is yours to fix: adjust the input and continue. Give up only when the error names something outside your reach, and say plainly what is missing.
+
+When the context fills, old tool results are cleared to save room and only the most recent are kept; a cleared result reads as a placeholder telling you to re-run the tool. Write down what you need from a result, a path, a line, a value, before you move on, so a later step does not depend on output that has evaporated.`
 
 // SystemPrompt renders block one of the cache-aligned prompt: identity
 // plus the session-stable environment facts, as one system block. The

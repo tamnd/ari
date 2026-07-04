@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -11,6 +12,7 @@ import (
 	"github.com/tamnd/ari/provider"
 	"github.com/tamnd/ari/provider/scripted"
 	"github.com/tamnd/ari/session"
+	"github.com/tamnd/ari/tool"
 )
 
 func textMsg(role, text string) provider.Message {
@@ -23,9 +25,9 @@ func resultMsg(id, text string) provider.Message {
 	}}}
 }
 
-// TestRungOneClearsOldToolResults reclaims context without a model call
-// and keeps the most recent results intact.
-func TestRungOneClearsOldToolResults(t *testing.T) {
+// TestRungTwoMicrocompact reclaims context without a model call and keeps
+// the most recent results intact.
+func TestRungTwoMicrocompact(t *testing.T) {
 	h := newHarness(scripted.New(), registry(t))
 	h.loop.Limits.KeepToolResults = 2
 	st := &State{msgs: []provider.Message{
@@ -35,7 +37,7 @@ func TestRungOneClearsOldToolResults(t *testing.T) {
 		resultMsg("c3", "recent one"),
 		resultMsg("c4", "recent two"),
 	}}
-	if !h.loop.clearOldToolResults(st) {
+	if !h.loop.microcompact(st) {
 		t.Fatal("expected results to be cleared")
 	}
 	if st.msgs[1].Blocks[0].Text != clearedResult || st.msgs[2].Blocks[0].Text != clearedResult {
@@ -45,8 +47,83 @@ func TestRungOneClearsOldToolResults(t *testing.T) {
 		t.Fatal("recent results must survive")
 	}
 	// Idempotent: nothing new to clear on the second pass.
-	if h.loop.clearOldToolResults(st) {
+	if h.loop.microcompact(st) {
 		t.Fatal("second pass must be a no-op")
+	}
+}
+
+// TestRungOneSnip drops the pre-boundary history and re-bases the
+// boundary, keeping the visible tail byte-for-byte and leaving nothing
+// before it (D6). A boundary of zero is a no-op.
+func TestRungOneSnip(t *testing.T) {
+	h := newHarness(scripted.New(), registry(t))
+	st := &State{
+		msgs: []provider.Message{
+			textMsg("system", "[history compacted]"),
+			textMsg("user", "the summary"),
+			textMsg("assistant", "live one"),
+			textMsg("user", "live two"),
+		},
+		boundaryIdx: 1, // model sees from "the summary" on
+	}
+	tail := append([]provider.Message{}, st.msgs[st.boundaryIdx:]...)
+	if n := h.loop.snip(st); n != 1 {
+		t.Fatalf("snip dropped %d, want 1", n)
+	}
+	if st.boundaryIdx != 0 {
+		t.Fatalf("boundary = %d, want 0 after snip", st.boundaryIdx)
+	}
+	if len(st.msgs) != len(tail) {
+		t.Fatalf("retained %d messages, want %d", len(st.msgs), len(tail))
+	}
+	for i := range tail {
+		if st.msgs[i].Blocks[0].Text != tail[i].Blocks[0].Text {
+			t.Fatalf("tail message %d changed: %q vs %q", i, st.msgs[i].Blocks[0].Text, tail[i].Blocks[0].Text)
+		}
+	}
+	if n := h.loop.snip(st); n != 0 {
+		t.Fatalf("snip at boundary 0 dropped %d, want 0", n)
+	}
+}
+
+// TestRungTwoAvoidsSummary: when trimming old tool results alone drops
+// the live window under the target, the ladder stops at rung two and
+// never makes the summarize call. The scripted provider has no responses,
+// so any model call would panic, which is the assertion.
+func TestRungTwoAvoidsSummary(t *testing.T) {
+	rec := &recordingProvider{inner: scripted.New()} // zero responses on purpose
+	h := newHarness(rec, registry(t))
+	h.loop.Limits.KeepToolResults = 1
+	big := strings.Repeat("x ", 400) // ~200 tokens each
+	st := &State{msgs: []provider.Message{
+		textMsg("user", "go"),
+		resultMsg("c1", big),
+		resultMsg("c2", big),
+		resultMsg("c3", big),
+		resultMsg("c4", "small recent"),
+	}}
+	// Above target with the big results present, under it once they clear.
+	h.loop.Limits.AutoCompactAt = h.loop.liveTokens(st) - 100
+
+	h.loop.compact(t.Context(), st)
+
+	if st.next != transAssemble {
+		t.Fatalf("next = %d, want assemble (rung two short-circuit)", st.next)
+	}
+	if !st.compactedThisTurn {
+		t.Fatal("rung two must mark the turn compacted")
+	}
+	if st.boundaryIdx != 0 || st.compactions != 0 {
+		t.Fatalf("rung two must not summarize: boundary=%d compactions=%d", st.boundaryIdx, st.compactions)
+	}
+	if len(rec.requests) != 0 {
+		t.Fatalf("rung two made %d model calls, want 0", len(rec.requests))
+	}
+	if st.msgs[1].Blocks[0].Text != clearedResult {
+		t.Fatal("old results must be cleared")
+	}
+	if st.msgs[0].Blocks[0].Text != "go" {
+		t.Fatal("the user prompt must never be cleared")
 	}
 }
 
@@ -158,6 +235,63 @@ func TestAutoCompactionMidRun(t *testing.T) {
 	}
 	if len(*h.rows) != 3 {
 		t.Fatalf("ledger rows = %d, want 3 (two turns + compaction)", len(*h.rows))
+	}
+}
+
+// TestMicrocompactMidRunKeepsUserMessage is the replay half of the DoD
+// (D23): a real multi-turn run crosses the auto-compaction threshold,
+// rung two trims an old tool result under target with no model call, the
+// run completes, and the live user prompt is never lost.
+func TestMicrocompactMidRunKeepsUserMessage(t *testing.T) {
+	big := strings.Repeat("data ", 1500) // ~1875 tokens per tool result
+	reader := &fakeTool{
+		name: "reader", safe: true,
+		call: func(context.Context, json.RawMessage, *tool.ToolContext, tool.ProgressFunc) (*tool.Result, error) {
+			return &tool.Result{Model: big}, nil
+		},
+	}
+	p := scripted.New(
+		scripted.Response{
+			Text: "reading",
+			Calls: []provider.ToolCall{
+				call("c1", "reader", `{}`),
+				call("c2", "reader", `{}`),
+			},
+			Usage: provider.Usage{Input: 1, Output: 1},
+		},
+		scripted.Response{Text: "done", Usage: provider.Usage{Input: 1, Output: 1}},
+	)
+	rec := &recordingProvider{inner: p}
+	h := newHarness(rec, registry(t, reader))
+	h.loop.Limits.KeepToolResults = 1
+	h.loop.Limits.AutoCompactAt = 3000 // above two results, below one
+
+	out := run(t, h, "start")
+	if out.Reason != TermCompleted {
+		t.Fatalf("reason = %s, want completed", out.Reason)
+	}
+	// Two model calls only: turn one and turn two. A third would mean the
+	// ladder climbed to a summarize instead of stopping at rung two.
+	if len(rec.requests) != 2 {
+		t.Fatalf("model calls = %d, want 2 (no summarize)", len(rec.requests))
+	}
+	final := rec.requests[1].Messages
+	var sawStart, sawCleared bool
+	for _, m := range final {
+		for _, b := range m.Blocks {
+			if strings.Contains(b.Text, "start") {
+				sawStart = true
+			}
+			if b.Text == clearedResult {
+				sawCleared = true
+			}
+		}
+	}
+	if !sawStart {
+		t.Fatal("the live user prompt was lost across the microcompact")
+	}
+	if !sawCleared {
+		t.Fatal("rung two did not clear an old tool result")
 	}
 }
 
