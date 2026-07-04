@@ -198,11 +198,84 @@ func TestCloseSweepsChildren(t *testing.T) {
 		t.Fatalf("post child: %v", err)
 	}
 
-	if err := bb.Close(ctx, "parent"); err != nil {
+	if err := bb.Close(ctx, "parent", nil); err != nil {
 		t.Fatalf("close: %v", err)
 	}
 	if s := stateFor(t, db, parentID); s != string(StateExpired) {
 		t.Errorf("parent state after close = %s, want expired", s)
+	}
+	if s := stateFor(t, db, childID); s != string(StateExpired) {
+		t.Errorf("child state after close = %s, want expired", s)
+	}
+}
+
+// TestCloseBlocksUnansweredQuestion is the slice-15 DoD that a Question left
+// open when the graph closes is not swept silently: it is journaled unresolved
+// and its subtask is marked blocked, never expired like it simply timed out and
+// never left claimed like a phantom in flight. A non-blocking advisory question
+// expires with the rest, because the worker did not stop on it.
+func TestCloseBlocksUnansweredQuestion(t *testing.T) {
+	ctx := context.Background()
+	bb, db := openBoard(t)
+
+	subGoalID, err := bb.Post(ctx, Entry{SessionID: "s1", TaskID: "sub", Payload: brief("b-sub", "sub", nil)})
+	if err != nil {
+		t.Fatalf("post subtask goal: %v", err)
+	}
+	if _, ok, cerr := bb.Claim(ctx, "worker-1", ClaimFilter{SessionID: "s1"}); cerr != nil || !ok {
+		t.Fatalf("claim subtask: ok=%v err=%v", ok, cerr)
+	}
+
+	blockingID, err := bb.Post(ctx, Entry{SessionID: "s1", TaskID: "sub", Payload: question("q-block", "sub")})
+	if err != nil {
+		t.Fatalf("post blocking question: %v", err)
+	}
+	advisory := question("q-advice", "sub")
+	advisory.Blocking = false
+	advisoryID, err := bb.Post(ctx, Entry{SessionID: "s1", TaskID: "sub", Payload: advisory})
+	if err != nil {
+		t.Fatalf("post advisory question: %v", err)
+	}
+
+	var unresolved [][]string
+	journal := func(name string, ids []string) {
+		if name == EventQuestionUnresolved {
+			unresolved = append(unresolved, ids)
+		}
+	}
+	if err := bb.Close(ctx, "sub", journal); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+
+	if s := stateFor(t, db, blockingID); s != string(StateBlocked) {
+		t.Errorf("blocking question state = %s, want blocked", s)
+	}
+	if s := stateFor(t, db, subGoalID); s != string(StateBlocked) {
+		t.Errorf("subtask state = %s, want blocked, not a phantom completion or a plain expiry", s)
+	}
+	if s := stateFor(t, db, advisoryID); s != string(StateExpired) {
+		t.Errorf("advisory question state = %s, want expired; only a blocking question blocks the subtask", s)
+	}
+	if len(unresolved) != 1 || len(unresolved[0]) != 1 || unresolved[0][0] != blockingID {
+		t.Errorf("unresolved journal = %v, want one event carrying the blocking question id %s", unresolved, blockingID)
+	}
+}
+
+// TestCloseWithoutQuestionsStillSweeps proves the block path does not change the
+// ordinary close: with no open questions, a nil journal is fine and every child
+// still ends expired.
+func TestCloseWithoutQuestionsStillSweeps(t *testing.T) {
+	ctx := context.Background()
+	bb, db := openBoard(t)
+	if _, err := bb.Post(ctx, Entry{SessionID: "s1", TaskID: "parent", Payload: brief("b-root", "parent", nil)}); err != nil {
+		t.Fatalf("post parent: %v", err)
+	}
+	childID, err := bb.Post(ctx, Entry{SessionID: "s1", TaskID: "child", Parent: "parent", Payload: brief("b-child", "child", nil)})
+	if err != nil {
+		t.Fatalf("post child: %v", err)
+	}
+	if err := bb.Close(ctx, "parent", nil); err != nil {
+		t.Fatalf("close: %v", err)
 	}
 	if s := stateFor(t, db, childID); s != string(StateExpired) {
 		t.Errorf("child state after close = %s, want expired", s)

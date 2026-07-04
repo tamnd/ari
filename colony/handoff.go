@@ -248,12 +248,17 @@ func (v Verdict) Validate() error {
 // Question is the stuck signal: a worker that cannot proceed posts one
 // instead of guessing and instead of prompting the user, which it is
 // forbidden to do (slice 15). The answer flows back as a Finding, so no
-// sixth type is needed.
+// sixth type is needed. A Question born from an auto-denied permission Ask
+// carries the rendered Consequence the human needs to decide (the diff for
+// an edit, the command for sh) and Context refs to the rest, so the
+// foreground can judge without the worker's transcript.
 type Question struct {
 	Header
-	Ask      string   `json:"ask"`
-	Options  []string `json:"options,omitempty"`
-	Blocking bool     `json:"blocking"`
+	Ask         string       `json:"ask"`
+	Consequence string       `json:"consequence,omitempty"`
+	Options     []string     `json:"options,omitempty"`
+	Context     []ContextRef `json:"context,omitempty"`
+	Blocking    bool         `json:"blocking"`
 }
 
 // Validate demands the question itself.
