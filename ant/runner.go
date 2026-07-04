@@ -294,6 +294,17 @@ func (r *Runner) RunTurn(ctx context.Context, t *core.TurnHandle) error {
 	// stream, but dispatch still wakes the one session worker below. The slice
 	// that fans out reads this same assignment to decide single versus split.
 	brief, routed := r.route(ctx, t)
+	// A survey or research request that names several files decomposes into a
+	// surveyor per file and, if the gate approves the split, runs those surveys
+	// in parallel before the foreground turn. Their findings ride the task tail
+	// so the worker synthesizes them instead of reading every file itself. A
+	// refusal or an undecomposable request leaves the prompt untouched and the
+	// turn runs single-ant (doc 09 section 5, D5).
+	if routed {
+		if preface := r.fanOut(ctx, t, brief); preface != "" {
+			t.Request.Text = preface + t.Request.Text
+		}
+	}
 	w, err := r.workerFor(ctx, t)
 	if err != nil {
 		return err
