@@ -87,6 +87,64 @@ func TestForegroundSurveyFansOutAndSynthesizes(t *testing.T) {
 	}
 }
 
+// TestForegroundSurveyRefusalNamesTest is the quiet half of D5 on the live
+// path: a two-file survey on a fresh colony decomposes, but with no survey cost
+// history the gate refuses on the budget test. The refusal stays off the normal
+// stream, but a colony.fanout.refused event names the failing test on the debug
+// lane, and no colony.fanout.approved fires, so the turn ran single-ant.
+func TestForegroundSurveyRefusalNamesTest(t *testing.T) {
+	root := t.TempDir()
+	for _, name := range []string{"config.go", "server.go"} {
+		if err := os.WriteFile(filepath.Join(root, name), []byte("package main\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	done := scripted.Response{Text: "answered single-ant", Usage: provider.Usage{Input: 10, Output: 5}, Stop: "end_turn"}
+	_, c := openDispatchColony(t, root, scripted.New(done, done, done))
+	ctx := context.Background()
+
+	sub, err := c.Events(ctx, core.EventFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sid, err := c.NewSession(ctx, core.NewSessionRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Submit(ctx, core.SubmitRequest{
+		Session: sid,
+		Text:    "explain how config.go and server.go work together",
+		Mode:    core.ModeFullAuto,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	evs := collect(t, sub, event.TypeTurnFinished)
+
+	var refused *event.FanOutRefused
+	for _, e := range evs {
+		if e.Type == event.TypeFanOutApproved {
+			t.Fatal("a fresh colony with no survey cost history must not approve a fan-out")
+		}
+		if e.Type != event.TypeFanOutRefused {
+			continue
+		}
+		var fr event.FanOutRefused
+		if err := json.Unmarshal(e.Payload, &fr); err != nil {
+			t.Fatal(err)
+		}
+		refused = &fr
+	}
+	if refused == nil {
+		t.Fatal("no colony.fanout.refused event for a survey the gate declined")
+	}
+	if refused.Failed != "budget" {
+		t.Errorf("failed test = %q, want budget for a colony with no cost history", refused.Failed)
+	}
+	if refused.Reason == "" {
+		t.Error("a refusal names the failing test but carries no reason")
+	}
+}
+
 // anyRequestContains reports whether any recorded request carries the substring
 // in any of its message blocks, so a test can assert the fan-out preface
 // reached the foreground worker's prompt.

@@ -58,9 +58,10 @@ func (r *Runner) decompose(brief colony.TaskBrief) []colony.TaskBrief {
 
 // fanOut runs the D5 gate on a decomposed foreground brief and, on approval,
 // runs the surveys and returns a preface for the foreground turn to synthesize.
-// A refusal stays silent and returns an empty preface, so the turn proceeds
-// single-ant exactly as it did before, which is D5's cheap-and-quiet rule: only
-// an approval is loud, and it carries the full argument the gate weighed. The
+// A refusal returns an empty preface, so the turn proceeds single-ant exactly
+// as it did before, which is D5's cheap-and-quiet rule: only an approval is
+// loud on the normal stream, and it carries the full argument the gate weighed;
+// a refusal only whispers the failing test onto the debug lane. The
 // gate reads the class cost history the trails hold, so a colony with no survey
 // history yet refuses until a foreground survey has folded its cost (doc 06
 // section 5).
@@ -69,8 +70,16 @@ func (r *Runner) fanOut(ctx context.Context, t *core.TurnHandle, brief colony.Ta
 	if len(subs) < 2 {
 		return ""
 	}
-	plan := r.queen.FanOutGate(ctx, subs, int64(brief.Budget.Tokens))
+	plan, refusal := r.queen.FanOutDecide(ctx, subs, int64(brief.Budget.Tokens))
 	if plan == nil {
+		// A refusal stays off the normal stream, but the debug lane names the
+		// failing test so a human auditing the journal sees why the colony did
+		// not wake, not a bare nil (doc 06 section 5, plan 6.2).
+		_ = r.emit(event.TypeFanOutRefused, string(t.Session), string(t.Turn), event.FanOutRefused{
+			Task:   brief.TaskID,
+			Failed: refusal.Failed,
+			Reason: refusal.Reason,
+		})
 		return ""
 	}
 	_ = r.emit(event.TypeFanOutApproved, string(t.Session), string(t.Turn), event.FanOutApproved{
