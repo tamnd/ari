@@ -64,8 +64,8 @@ func TestFreshDatabaseMigratesToHead(t *testing.T) {
 	if err != nil {
 		t.Fatalf("schemaVersion: %v", err)
 	}
-	if v != 2 {
-		t.Fatalf("head version = %d, want 2", v)
+	if v != 3 {
+		t.Fatalf("head version = %d, want 3", v)
 	}
 }
 
@@ -83,8 +83,8 @@ func TestMigrateIsIdempotent(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("count migrations: %v", err)
 	}
-	if count != 2 {
-		t.Fatalf("schema_migrations rows = %d, want 2 (no re-apply)", count)
+	if count != 3 {
+		t.Fatalf("schema_migrations rows = %d, want 3 (no re-apply)", count)
 	}
 }
 
@@ -114,7 +114,7 @@ func TestMigrateFromVersionZeroUpgradesInOrder(t *testing.T) {
 		t.Fatal("migrate from zero did not build both migrations")
 	}
 	v, _ := s.schemaVersion(ctx)
-	if v != 2 {
-		t.Fatalf("version after upgrade = %d, want 2", v)
+	if v != 3 {
+		t.Fatalf("version after upgrade = %d, want 3", v)
 	}
 }

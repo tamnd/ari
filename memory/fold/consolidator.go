@@ -42,15 +42,38 @@ type Consolidator struct {
 	store   *sqlite.Store
 	sum     Summarizer
 	emit    func(FoldReport)
+	repo    Repo
 	clock   func() time.Time
 	running atomic.Bool
+}
+
+// Option configures a consolidator at construction. Options keep New's required
+// arguments to the store, the model, and the emitter, so a caller that has no
+// working tree to check against (a test, an import job) builds one without one.
+type Option func(*Consolidator)
+
+// WithRepo gives the consolidator a working tree so the fold's invalidation pass
+// can demote memories whose anchored files changed. Without it the pass is a
+// no-op and memories only evaporate on their ttl clock.
+func WithRepo(r Repo) Option {
+	return func(c *Consolidator) { c.repo = r }
+}
+
+// WithClock overrides the wall clock, so a test can advance time and watch a
+// memory decay on its ttl class.
+func WithClock(now func() time.Time) Option {
+	return func(c *Consolidator) { c.clock = now }
 }
 
 // New builds a consolidator over a store and a cheap-tier summarizer. emit, if
 // set, is called once per folded namespace with the fold's report so the loop
 // can put a memory.folded event on the bus; pass nil to fold silently.
-func New(store *sqlite.Store, sum Summarizer, emit func(FoldReport)) *Consolidator {
-	return &Consolidator{store: store, sum: sum, emit: emit, clock: time.Now}
+func New(store *sqlite.Store, sum Summarizer, emit func(FoldReport), opts ...Option) *Consolidator {
+	c := &Consolidator{store: store, sum: sum, emit: emit, clock: time.Now}
+	for _, opt := range opts {
+		opt(c)
+	}
+	return c
 }
 
 // Fold runs one consolidation cycle over every namespace with pending
@@ -161,6 +184,19 @@ func (c *Consolidator) FoldNamespace(ctx context.Context, ns string) (FoldReport
 
 	if err := c.store.CommitFold(ctx, merged, ids, c.clock()); err != nil {
 		return report, err
+	}
+
+	// The fold is also where memory is invalidated: with the survivors written,
+	// check which anchored rows the working tree moved out from under and demote
+	// them. The diff runs once per distinct anchor_commit, not once per row.
+	demoted, err := c.demoteStale(ctx, ns)
+	if err != nil {
+		return report, err
+	}
+	for _, d := range demoted {
+		if d.Stale {
+			report.Demoted++
+		}
 	}
 	return report, nil
 }

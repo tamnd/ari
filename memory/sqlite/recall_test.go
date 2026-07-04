@@ -194,3 +194,59 @@ func TestParkPrefersImportantAmongEqualRelevance(t *testing.T) {
 		t.Fatalf("rank = [%s %s], want HIGH first on importance", cands[0].m.ID, cands[1].m.ID)
 	}
 }
+
+// TestParkDownranksStaleRow is the demotion in isolation: two rows tie at the
+// top on every Park component, but the stale one is weighted down and sinks
+// below its live twin without dropping out entirely. A third floor row keeps the
+// normalization from flattening the top pair to zero.
+func TestParkDownranksStaleRow(t *testing.T) {
+	cands := []scored{
+		{m: Memory{ID: "STALE", Importance: 5, Stale: true}, relevance: 1.0, recencyRaw: 1.0},
+		{m: Memory{ID: "LIVE", Importance: 5}, relevance: 1.0, recencyRaw: 1.0},
+		{m: Memory{ID: "FLOOR", Importance: 1}, relevance: 0.0, recencyRaw: 0.0},
+	}
+	rankByPark(cands)
+	if recallIDs(idsFromScored(cands))[0] != "LIVE" {
+		t.Fatalf("rank = %v, want LIVE first over its stale twin", idsFromScored(cands))
+	}
+	if cands[1].m.ID != "STALE" {
+		t.Fatalf("rank = %v, want STALE second, above the floor", idsFromScored(cands))
+	}
+}
+
+func idsFromScored(cands []scored) []Memory {
+	out := make([]Memory, len(cands))
+	for i, c := range cands {
+		out[i] = c.m
+	}
+	return out
+}
+
+// TestRecencyDecaysOnTTLClass is the ttl-class clock: two rows recalled the same
+// way, identical text and access time, but a fast-ttl row has a one-day recency
+// half-life against the normal row's thirty, so ten days on the fast row has
+// decayed far enough to rank below the normal one.
+func TestRecencyDecaysOnTTLClass(t *testing.T) {
+	s := migrated(t)
+	ctx := context.Background()
+	fast := mem("FAST", "shared rule", "the shared busy timeout rule", 5, nil)
+	fast.TTLClass = TTLFast
+	slow := mem("SLOW", "shared rule", "the shared busy timeout rule", 5, nil)
+	slow.TTLClass = TTLNormal
+	if err := s.InsertMemory(ctx, fast, nil, nil); err != nil {
+		t.Fatalf("insert fast: %v", err)
+	}
+	if err := s.InsertMemory(ctx, slow, nil, nil); err != nil {
+		t.Fatalf("insert slow: %v", err)
+	}
+
+	later := time.Unix(1000, 0).Add(10 * 24 * time.Hour)
+	rows, err := s.recallAt(ctx, "ant_worker", "shared busy timeout rule", nil, 10, later)
+	if err != nil {
+		t.Fatalf("recall: %v", err)
+	}
+	ids := recallIDs(rows)
+	if len(ids) != 2 || ids[0] != "SLOW" {
+		t.Fatalf("rank = %v, want SLOW first once the fast row decayed", ids)
+	}
+}
