@@ -2,6 +2,7 @@ package hook
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 )
@@ -49,6 +50,37 @@ func TestRunOtherExitNonBlocking(t *testing.T) {
 	}
 	if !res.NonBlockingError {
 		t.Fatalf("exit 1 should be a non-blocking error: %+v", res)
+	}
+}
+
+// TestRunRedactsSecretsFromStdout proves a hook that echoes a secret env
+// value cannot leak it into the transcript: the raw stdout carries the marker
+// naming the variable, never the value (D16).
+func TestRunRedactsSecretsFromStdout(t *testing.T) {
+	t.Setenv("MY_API_TOKEN", "sk-live-abcdef123456")
+	res := run(t, `echo "the key is $MY_API_TOKEN"`, time.Second)
+	if strings.Contains(res.Stdout, "sk-live-abcdef123456") {
+		t.Fatalf("secret value leaked into stdout: %q", res.Stdout)
+	}
+	if !strings.Contains(res.Stdout, "<redacted:MY_API_TOKEN>") {
+		t.Fatalf("stdout missing the redaction marker: %q", res.Stdout)
+	}
+}
+
+// TestRunRedactsSecretsFromContext proves the scrub runs before parsing, so a
+// secret smuggled through additionalContext is redacted before it can reach
+// model context (D16).
+func TestRunRedactsSecretsFromContext(t *testing.T) {
+	t.Setenv("DEPLOY_SECRET", "hunter2hunter2")
+	res := run(t, `printf '{"additionalContext":"token %s"}' "$DEPLOY_SECRET"`, time.Second)
+	if res.Output == nil {
+		t.Fatalf("control output did not parse: %+v", res)
+	}
+	if strings.Contains(res.Output.AdditionalContext, "hunter2hunter2") {
+		t.Fatalf("secret leaked into additionalContext: %q", res.Output.AdditionalContext)
+	}
+	if !strings.Contains(res.Output.AdditionalContext, "<redacted:DEPLOY_SECRET>") {
+		t.Fatalf("additionalContext missing the redaction marker: %q", res.Output.AdditionalContext)
 	}
 }
 
