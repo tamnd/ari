@@ -219,10 +219,14 @@ type ColonyThrottle struct {
 
 // WorkerWoke marks a worker ant starting a subtask. It rides the
 // must-deliver lane: the colony view is never wrong about who is alive.
+// File is the sidechain the worker writes to, the locator the colony
+// drill-in reads back to render the ant's run; it is the card-and-task
+// key, not the forager lane, because two lanes on one card share a file.
 type WorkerWoke struct {
 	Ant  string `json:"ant"`
 	Task string `json:"task"`
 	Tier string `json:"tier,omitempty"`
+	File string `json:"file,omitempty"`
 }
 
 // WorkerBlocked marks a worker stopping on a Question it cannot answer. It

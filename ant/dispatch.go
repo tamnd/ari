@@ -213,6 +213,7 @@ func (r *Runner) runSubtask(ctx context.Context, store session.Store, sessionID 
 		Ant:  worker,
 		Task: brief.TaskID,
 		Tier: string(card.Tier),
+		File: sidechainFile(card.ID, brief.TaskID),
 	})
 
 	// A writer runs in its own detached worktree at the shared base, so two

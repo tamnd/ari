@@ -97,7 +97,7 @@ func TestGoldenReplay(t *testing.T) {
 		{event.TypeLog, event.Log{Level: "debug", Text: "x"}},
 		{event.TypeError, event.ErrorInfo{Message: "boom"}},
 		{event.TypeTurnFinished, event.TurnFinished{ID: "t1", Reason: "done"}},
-		{event.TypeWorkerWoke, event.WorkerWoke{Ant: "forager-0", Task: "sub-a", Tier: "cheap"}},
+		{event.TypeWorkerWoke, event.WorkerWoke{Ant: "forager-0", Task: "sub-a", Tier: "cheap", File: "surveyor.sub-a"}},
 		{event.TypeWorkerBlocked, event.WorkerBlocked{Ant: "forager-0", Task: "sub-a", Question: "which module?"}},
 		{event.TypeWorkerFinished, event.WorkerFinished{Ant: "forager-0", Task: "sub-a", OK: true}},
 		{event.TypeColonyProgress, event.ColonyProgress{Ant: "forager-0", Task: "sub-a", Tokens: 1200}},

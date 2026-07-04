@@ -12,7 +12,7 @@ colony.question.unresolved: tasks?:[]string
 colony.throttle: reason:string, tasks?:[]string
 colony.worker.blocked: ant:string, task:string, question:string
 colony.worker.finished: ant:string, task:string, ok:bool
-colony.worker.woke: ant:string, task:string, tier?:string
+colony.worker.woke: ant:string, task:string, tier?:string, file?:string
 colony.worktree.conflict: tasks?:[]string
 error: code:string, message:string, retryable:bool, ant?:string, cause?:string
 hello: schema:int, cursor:int, server:string

@@ -16,6 +16,14 @@ import (
 	"github.com/tamnd/ari/tool"
 )
 
+// sidechainFile is the store key for a worker's sub-transcript: the card and
+// the task, joined. It is the ant's identity on disk, not the forager lane, so
+// two siblings running the same card on the same task write one shared file and
+// the drill-in reads back one run. The dispatch emits this key on WorkerWoke so
+// the colony panel can drill into the file without recomputing it (doc 09
+// section 12.2).
+func sidechainFile(cardID, taskID string) string { return cardID + "." + taskID }
+
 // workerMaxTurns bounds a colony worker's loop. A background worker gets a
 // tighter ceiling than the foreground's hundred because its job is one briefed
 // subtask, not an open-ended conversation (doc 09 section 5).
@@ -95,7 +103,7 @@ func NewDetachment(cfg DetachConfig) (*Detachment, error) {
 		parent:  cfg.Parent,
 		board:   cfg.Board,
 		store:   cfg.Store,
-		file:    cfg.Card.ID + "." + cfg.Brief.TaskID,
+		file:    sidechainFile(cfg.Card.ID, cfg.Brief.TaskID),
 		cwd:     cfg.Cwd,
 		baseRef: cfg.BaseRef,
 	}
