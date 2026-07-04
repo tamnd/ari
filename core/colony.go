@@ -229,6 +229,21 @@ func (c *Colony) Registry() *provider.Registry { return c.registry }
 // Ledger exposes the meter for roll-ups and for the loop to record turns.
 func (c *Colony) Ledger() *ledger.Ledger { return c.ledger }
 
+// Memory exposes the colony.db store the kernel objects share. The colony
+// package takes it as a structural substrate (its Read and Write are the
+// only slice it needs), so the runner can hand one writer to the card
+// store, the blackboard, and the worktrees without core importing colony
+// (doc 09 section 6.5, D10).
+func (c *Colony) Memory() *memsqlite.Store { return c.memory }
+
+// Emit puts one event on the journal from outside the core package. It is
+// the seam the colony's JournalFunc rides: the kernel names its records as
+// plain strings and the runner's closure lifts them onto the stream as
+// typed events. A nil payload is a bodyless event.
+func (c *Colony) Emit(typ event.Type, sessionID, turnID string, payload any) error {
+	return c.emit(typ, sessionID, turnID, payload)
+}
+
 // Start brings the background goroutines up: the journal writer and the
 // bus fan-out. Separate from Open so a client subscribes before any event
 // can be produced (doc 01 section 4.1).
