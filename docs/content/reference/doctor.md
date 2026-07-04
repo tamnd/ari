@@ -23,7 +23,11 @@ Doctor runs its checks in a fixed order and reports each as ok, a warning, or cr
 | Config health | The config loads, and any warning from an unknown or shadowed setting. | critical on load error, warning otherwise |
 | Permission mode | The standing permission default is not `full-auto`. | warning |
 | Local config gitignore | In a git repo with a project `.ari/`, that `.ari/local.toml` is gitignored. | warning |
-| Bind status | Any listening surface is configured safely. In M0 there is no listener, so this is always ok. | ok |
+| Workspace trust | Repo hooks are named and reported as gated until you trust the workspace. | warning when an untrusted workspace carries repo hooks |
+| Project memory size | `ARI.md` is under the per-file cap, so every house rule in it is actually read. | warning when it is over the cap |
+| Language server | Whether LSP is enabled and, when it is, whether `gopls` is on the PATH. | warning when enabled with no gopls |
+| MCP servers | Lists the MCP servers a session would attach, and flags a malformed `mcp.toml`. | warning on a parse error |
+| Bind status | Any listening surface is configured safely. There is no listener yet, so this is always ok. | ok |
 | Journal continuity | The session journal has no sequence gaps. | critical on a gap |
 
 The secrets check never logs the value it found. It names the file and the setting, so the finding tells you where to fix it without reprinting the secret.
