@@ -100,6 +100,7 @@ func New() *Doctor {
 		{Name: "config health", Run: checkConfigHealth},
 		{Name: "permission mode", Run: checkPermissionMode},
 		{Name: "local config gitignore", Run: checkLocalGitignore},
+		{Name: "workspace trust", Run: checkWorkspaceTrust},
 		{Name: "bind status", Run: checkBindStatus},
 		{Name: "journal continuity", Run: checkJournalContinuity},
 	}}

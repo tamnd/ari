@@ -28,6 +28,27 @@ type Verdict struct {
 // allowed, which only the tests use; the ant always wires the pipeline.
 type DecideFunc func(ctx context.Context, t tool.Tool, input json.RawMessage, callID string) Verdict
 
+// Hooks is the loop's seam to the tool-adjacent hooks. The ant wires it to
+// the trusted hook dispatcher; nil means no hooks, which is the case for an
+// untrusted workspace and for tests. The loop stays free of the hook package:
+// it knows only these two calls and the small result they return.
+type Hooks interface {
+	// PreTool runs the pre-tool hooks before the permission decision. A
+	// blocked result stops the call and its Message is fed back to the model.
+	PreTool(ctx context.Context, tool string, input json.RawMessage) HookResult
+	// PostTool runs the post-tool hooks after the tool returns. A blocked
+	// result feeds Message back to the model; otherwise Context is appended to
+	// the tool result. isErr routes to the post-tool-failure event.
+	PostTool(ctx context.Context, tool string, input json.RawMessage, result string, isErr bool) HookResult
+}
+
+// HookResult is the loop-facing outcome of a hook fire.
+type HookResult struct {
+	Block   bool   // a hook blocked (exit 2)
+	Message string // block or warning text, fed to the model on a block
+	Context string // additional context to append to the result
+}
+
 // Loop drives one ant through model turns to a terminal reason. The
 // fields are the run's fixed dependencies; everything that changes
 // across iterations lives in State.
@@ -47,6 +68,12 @@ type Loop struct {
 	Tools  *tool.Registry
 	TC     *tool.ToolContext
 	Decide DecideFunc
+
+	// Hooks is the tool-adjacent hook seam. Nil means no hooks, which is the
+	// case for an untrusted workspace and for tests; the ant wires it to the
+	// trusted dispatcher only when a workspace has hooks that pass the trust
+	// gate (doc 05 section 12).
+	Hooks Hooks
 
 	// Emit publishes one event on the stream; the colony's TurnHandle
 	// satisfies it. Nil drops events, for isolated transition tests.

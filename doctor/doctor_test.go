@@ -5,8 +5,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/tamnd/ari/config"
+	"github.com/tamnd/ari/hook"
 	"github.com/tamnd/ari/nest"
 )
 
@@ -196,5 +198,46 @@ func TestFullAutoDefaultWarns(t *testing.T) {
 	ctx.Config.Mode = "full-auto"
 	if f := findingFor(t, New().Run(ctx), "permission mode"); f.Status != StatusWarn {
 		t.Fatalf("full-auto default status = %v, want warn", f.Status)
+	}
+}
+
+// withProjectHook rewrites the project config to carry one repo hook and
+// reloads, so the trust check sees a repo hook to gate.
+func withProjectHook(t *testing.T, ctx *Context) {
+	t.Helper()
+	if err := os.MkdirAll(ctx.Nest.ProjectDir(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := "[[hooks.PostToolUse]]\nmatcher = \"write\"\ncommand = \"gofmt -w .\"\n"
+	if err := os.WriteFile(ctx.Nest.ProjectConfig(), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.Load(ctx.Nest, config.FlagOverrides{})
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	ctx.Config = cfg
+}
+
+func TestUntrustedWorkspaceWithRepoHookWarns(t *testing.T) {
+	ctx := freshNest(t)
+	withProjectHook(t, ctx)
+	f := findingFor(t, New().Run(ctx), "workspace trust")
+	if f.Status != StatusWarn {
+		t.Fatalf("untrusted repo hook status = %v, want warn", f.Status)
+	}
+	if !strings.Contains(f.Reason, "gofmt") {
+		t.Errorf("finding should name the repo hook: %s", f.Reason)
+	}
+}
+
+func TestTrustedWorkspaceWithRepoHookIsOK(t *testing.T) {
+	ctx := freshNest(t)
+	withProjectHook(t, ctx)
+	if err := hook.LoadTrust(ctx.Nest.TrustFile()).Trust(ctx.Nest.Root, time.Unix(1, 0)); err != nil {
+		t.Fatal(err)
+	}
+	if f := findingFor(t, New().Run(ctx), "workspace trust"); f.Status != StatusOK {
+		t.Fatalf("trusted repo hook status = %v, want ok (%s)", f.Status, f.Reason)
 	}
 }

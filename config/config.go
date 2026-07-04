@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	"github.com/BurntSushi/toml"
+	"github.com/tamnd/ari/hook"
 	"github.com/tamnd/ari/nest"
 )
 
@@ -85,11 +86,18 @@ type Config struct {
 	Automation Automation          `toml:"automation"`
 	LSP        LSP                 `toml:"lsp"`
 
+	// HookSpecs is keyed by event name, each entry a list of hook specs. It is
+	// decoded per file so each hook remembers the layer it came from, which is
+	// what the workspace trust gate keys on (doc 05 section 12). Read the
+	// resolved, layer-tagged hooks through Hooks, not this raw field.
+	HookSpecs map[string][]hook.Spec `toml:"hooks"`
+
 	// Mode is the permission mode for the run; flags-only, not persisted.
 	Mode string `toml:"-"`
 
 	origins  map[string]string
 	warnings []string
+	hooks    []hook.Command // resolved, layer-tagged, accumulated across files
 }
 
 // FlagOverrides carries the per-run flag values that sit above the files.
@@ -245,8 +253,48 @@ func (c *Config) mergeFile(source, path string) error {
 		c.LSP.Enabled = true
 		c.origins["lsp.enabled"] = source
 	}
+	c.mergeHooks(source, path, layer.HookSpecs)
 	return nil
 }
+
+// mergeHooks resolves one file's hooks into layer-tagged commands. An unknown
+// event name or a hook that fails to build is a warning, not an error, so one
+// bad hook never refuses the whole config and takes the session with it.
+func (c *Config) mergeHooks(source, path string, hooks map[string][]hook.Spec) {
+	for _, event := range sortedKeys(hooks) {
+		ev := hook.Event(event)
+		if !hook.Known(ev) {
+			c.warnings = append(c.warnings, fmt.Sprintf("%s: unknown hook event %q ignored", path, event))
+			continue
+		}
+		for _, spec := range hooks[event] {
+			cmd, err := spec.Build(ev, source)
+			if err != nil {
+				c.warnings = append(c.warnings, fmt.Sprintf("%s: %v", path, err))
+				continue
+			}
+			c.hooks = append(c.hooks, cmd)
+		}
+	}
+	if len(hooks) > 0 {
+		c.origins["hooks"] = source
+	}
+}
+
+// sortedKeys returns a map's keys in a deterministic order, so hook resolution
+// order does not depend on Go's map iteration order.
+func sortedKeys(m map[string][]hook.Spec) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+// Hooks returns the resolved, layer-tagged hooks in load order: user first,
+// then project, then local, so the runner can apply the trust gate per layer.
+func (c *Config) Hooks() []hook.Command { return c.hooks }
 
 // overrideModel points the frontier tier's head at one model for the run.
 func (c *Config) overrideModel(model string) {
