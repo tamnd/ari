@@ -279,6 +279,110 @@ func TestBackgroundIsNeverConcurrencySafe(t *testing.T) {
 	}
 }
 
+// TestBackgroundOutputIsReadableInALaterCall is the across-turns read: a
+// command launched in one call is inspected by a later call that names its
+// shell id, without a seventh tool.
+func TestBackgroundOutputIsReadableInALaterCall(t *testing.T) {
+	tc := testContext(t)
+	s := NewSh().(shTool)
+
+	if _, err := callSh(t, tc, s, `{"command":"echo across-turns","run_in_background":true}`); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	select {
+	case <-s.Background().get("bg1").Done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the job never finished")
+	}
+
+	res, err := callSh(t, tc, s, `{"job":"bg1"}`)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if !strings.Contains(res.Model, "across-turns") {
+		t.Errorf("read did not return the accumulated output:\n%s", res.Model)
+	}
+	if !strings.Contains(res.Model, "exited 0") {
+		t.Errorf("read did not report the exit status:\n%s", res.Model)
+	}
+}
+
+// TestBackgroundKillStopsTheJob: a later call with kill terminates the
+// process group and the read reports it as killed, not exited.
+func TestBackgroundKillStopsTheJob(t *testing.T) {
+	tc := testContext(t)
+	s := NewSh().(shTool)
+
+	if _, err := callSh(t, tc, s, `{"command":"sleep 30","run_in_background":true}`); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	job := s.Background().get("bg1")
+	if job == nil {
+		t.Fatal("job not registered")
+	}
+
+	res, err := callSh(t, tc, s, `{"job":"bg1","kill":true}`)
+	if err != nil {
+		t.Fatalf("kill: %v", err)
+	}
+	select {
+	case <-job.Done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("kill did not reap the job")
+	}
+	if !job.Killed() {
+		t.Error("job should be marked killed")
+	}
+	if !strings.Contains(res.Model, "killed") {
+		t.Errorf("kill result should say killed:\n%s", res.Model)
+	}
+}
+
+// TestCloseBackgroundReapsRunningJobs is the bounded-on-session-close rule: a
+// detached job still running when the session ends is killed, so a session
+// cannot leak a pile of processes (doc 01 section 6.1).
+func TestCloseBackgroundReapsRunningJobs(t *testing.T) {
+	tc := testContext(t)
+	s := NewSh().(shTool)
+
+	if _, err := callSh(t, tc, s, `{"command":"sleep 30","run_in_background":true}`); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	job := s.Background().get("bg1")
+
+	if err := s.CloseBackground(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	select {
+	case <-job.Done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("session close did not reap the running job")
+	}
+	if !job.Killed() {
+		t.Error("a job reaped on close is killed, not exited")
+	}
+}
+
+func TestReadingAnUnknownBackgroundJobErrors(t *testing.T) {
+	tc := testContext(t)
+	s := NewSh().(shTool)
+	if _, err := callSh(t, tc, s, `{"job":"bg99"}`); err == nil {
+		t.Fatal("reading a shell id that was never started must error")
+	}
+}
+
+func TestBackgroundReadIsReadOnlyButKillIsNot(t *testing.T) {
+	s := NewSh()
+	read := json.RawMessage(`{"job":"bg1"}`)
+	kill := json.RawMessage(`{"job":"bg1","kill":true}`)
+	if !s.IsReadOnly(read) || !s.IsConcurrencySafe(read) {
+		t.Error("reading a background job's output touches no state")
+	}
+	if s.IsReadOnly(kill) || s.IsConcurrencySafe(kill) {
+		t.Error("killing a background job mutates session state")
+	}
+}
+
 func TestEmptyCommandIsAValidationError(t *testing.T) {
 	tc := testContext(t)
 	_, err := callSh(t, tc, NewSh(), `{"command":"  "}`)

@@ -131,8 +131,28 @@ func (r *Runner) Close() error {
 		if w.mcp != nil {
 			_ = w.mcp.Close()
 		}
+		closeBackgroundShells(w)
 	}
 	return nil
+}
+
+// closeBackgroundShells reaps any detached shells a worker's tools left
+// running, so a background build cannot outlive the session. It finds the
+// owner by interface rather than naming sh, so the runner stays ignorant of
+// which tool spawns processes.
+func closeBackgroundShells(w *worker) {
+	if w.loop == nil || w.loop.Tools == nil {
+		return
+	}
+	for _, name := range w.loop.Tools.Names() {
+		t, ok := w.loop.Tools.Resolve(name)
+		if !ok {
+			continue
+		}
+		if bc, ok := t.(tool.BackgroundCloser); ok {
+			_ = bc.CloseBackground()
+		}
+	}
 }
 
 // warn surfaces a non-fatal setup problem to the operator's terminal. An
