@@ -3,3 +3,8 @@ ari
 *.test
 *.out
 .ari/local.toml
+
+# Built docs site (tago output) and its cache
+/docs/public/
+/docs/public-pages/
+/docs/public-cf/

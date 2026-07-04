@@ -1,0 +1,10 @@
+title       = "ari"
+baseURL     = "https://ari.tamnd.com/"
+description = "ari (アリ, ant) is a coding agent for the terminal, shaped like an ant colony. One binary carries a headless core and every surface as a client of it: a TUI you live in and ari -p for scripts and CI. Secure by default, honest about cost, and built on plain diffable files."
+contentDir  = "content"
+outputDir   = "public"
+theme       = "tago-doks"
+syntaxHighlight = "true"
+
+[params]
+github = "https://github.com/tamnd/ari"
