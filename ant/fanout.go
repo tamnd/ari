@@ -10,16 +10,20 @@ import (
 	"github.com/tamnd/ari/event"
 )
 
-// decompose splits a read-only foreground brief into one surveyor subtask per
-// file it names, so a survey or research request that references several files
-// can run its reads in parallel. Every subtask it proposes is a surveyor
-// producing a finding, so the split is independent and read-heavy by
-// construction; whether it is worth the tokens is the gate's call, not this
-// function's. A brief that is not a survey or research task, or that names
-// fewer than two files, has nothing to split and yields nil, so the turn stays
-// single-ant (doc 09 section 5, D5).
+// decompose splits a foreground brief into one subtask per file it names, so a
+// request that references several files can run its work across them in
+// parallel. A read-only survey or research brief splits into surveyors producing
+// findings; an edit or migrate brief splits into workers producing patches, one
+// per file, whose disjoint anchors let the gate prove independence and the
+// worktree machinery compose. Every proposed split is independent by
+// construction here; whether it is worth the tokens is the gate's call, not this
+// function's, and a writer split still has to clear the gate's specialist or
+// read-heavy test before it wakes. A brief whose class does not decompose, or
+// that names fewer than two files, has nothing to split and yields nil, so the
+// turn stays single-ant (doc 09 section 5, D5).
 func (r *Runner) decompose(brief colony.TaskBrief) []colony.TaskBrief {
-	if brief.Class != colony.ClassSurvey && brief.Class != colony.ClassResearch {
+	deliverable, directedTo, ok := splitShape(brief.Class)
+	if !ok {
 		return nil
 	}
 	var files []string
@@ -45,15 +49,32 @@ func (r *Runner) decompose(brief colony.TaskBrief) []colony.TaskBrief {
 				Labels:    brief.Labels,
 			},
 			Goal:        fmt.Sprintf("%s (focus: %s)", brief.Goal, f),
-			Deliverable: colony.KindFinding,
+			Deliverable: deliverable,
 			Class:       brief.Class,
-			DirectedTo:  "surveyor",
+			DirectedTo:  directedTo,
 			Budget:      colony.Budget{Tokens: per},
 			Anchors:     []colony.Anchor{{Kind: colony.AnchorFile, Value: f}},
 			Embed:       brief.Embed,
 		})
 	}
 	return subs
+}
+
+// splitShape maps a brief's class to the fan-out subtask it decomposes into, or
+// reports that the class does not decompose. Survey and research are read-only,
+// so they split into surveyors producing findings; edit and migrate change
+// files, so they split into workers producing patches whose disjoint file
+// anchors the gate's independence test reads and the writer worktrees compose.
+// Every other class stays single-ant: a debug or mechanical task is not the
+// per-file parallel shape this split assumes.
+func splitShape(class colony.TaskClass) (deliverable colony.Kind, directedTo string, ok bool) {
+	switch class {
+	case colony.ClassSurvey, colony.ClassResearch:
+		return colony.KindFinding, "surveyor", true
+	case colony.ClassEdit, colony.ClassMigrate:
+		return colony.KindPatch, "worker", true
+	}
+	return "", "", false
 }
 
 // fanOut runs the D5 gate on a decomposed foreground brief and, on approval,
