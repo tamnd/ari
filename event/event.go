@@ -54,6 +54,23 @@ const (
 	TypeAntSpawned   Type = "ant.spawned"
 	TypeRouteDecided Type = "route.decided"
 	TypeMemoryFolded Type = "memory.folded"
+
+	// The colony vocabulary. Defined here for the wire schema; the colony
+	// runner in M3 emits them. The colony package itself never imports this
+	// package (it is kernel and dependency-light), so it names these events
+	// as plain strings through the JournalFunc seam and the values match the
+	// constants below to the byte.
+	TypeFanOutApproved     Type = "colony.fanout.approved"
+	TypeFanOutRefused      Type = "colony.fanout.refused"
+	TypeColonyThrottle     Type = "colony.throttle"
+	TypeWorkerWoke         Type = "colony.worker.woke"
+	TypeWorkerBlocked      Type = "colony.worker.blocked"
+	TypeWorkerFinished     Type = "colony.worker.finished"
+	TypeColonyProgress     Type = "colony.progress"
+	TypeQuestionUnresolved Type = "colony.question.unresolved"
+	TypeWorktreeConflict   Type = "colony.worktree.conflict"
+	TypeArbitrationOpened  Type = "colony.arbitration.opened"
+	TypeArbitrationClosed  Type = "colony.arbitration.closed"
 )
 
 // Event is the envelope every payload travels in. Seq is assigned by the
