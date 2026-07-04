@@ -5,7 +5,9 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/tamnd/ari/colony"
@@ -286,5 +288,116 @@ func briefFor(t *testing.T, h detachHarness) colony.TaskBrief {
 		Goal:        "survey the target and report what the marker says",
 		Deliverable: colony.KindFinding,
 		Context:     []colony.ContextRef{{Path: "notes.txt"}},
+	}
+}
+
+// runGit runs a git command in dir with a fixed identity and fails the test on
+// a nonzero exit, so a repo can be staged without a global git config.
+func runGit(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	full := append([]string{"-C", dir, "-c", "user.email=ant@test", "-c", "user.name=ant"}, args...)
+	out, err := exec.Command("git", full...).CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, out)
+	}
+	return string(out)
+}
+
+// patchWorktree makes a temp git repo with one committed base file, the shape a
+// patch worker runs against.
+func patchWorktree(t *testing.T) string {
+	t.Helper()
+	repo := t.TempDir()
+	runGit(t, repo, "init", "-q")
+	if err := os.WriteFile(filepath.Join(repo, "base.txt"), []byte("base\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, repo, "add", "-A")
+	runGit(t, repo, "commit", "-q", "-m", "base")
+	return repo
+}
+
+// patchDetachment builds a patch-deliverable worker over the given worktree.
+func patchDetachment(t *testing.T, repo string) *Detachment {
+	t.Helper()
+	d, err := NewDetachment(DetachConfig{
+		Card: colony.WorkerCard(),
+		Brief: colony.TaskBrief{
+			Header:      colony.Header{ID: "b1", Kind: colony.KindTaskBrief, From: "queen", TaskID: "t1"},
+			Goal:        "add a file",
+			Deliverable: colony.KindPatch,
+		},
+		Provider: scripted.New(),
+		Model:    "fable-test",
+		Cwd:      repo,
+		BaseRef:  "HEAD",
+	})
+	if err != nil {
+		t.Fatalf("new detachment: %v", err)
+	}
+	return d
+}
+
+// TestDetachmentHarvestsPatch closes the slice-12 gap: a worker that left
+// changes in its worktree harvests as a colony.Patch whose diff is the full
+// change against the base ref, new files included.
+func TestDetachmentHarvestsPatch(t *testing.T) {
+	repo := patchWorktree(t)
+	// The worker's edit: a new file the base commit did not have.
+	if err := os.WriteFile(filepath.Join(repo, "new.txt"), []byte("hello world\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	d := patchDetachment(t, repo)
+	h, err := d.harvest()
+	if err != nil {
+		t.Fatalf("harvest: %v", err)
+	}
+	patch, ok := h.(colony.Patch)
+	if !ok {
+		t.Fatalf("harvest returned %T, want colony.Patch", h)
+	}
+	if patch.BaseRef != "HEAD" {
+		t.Errorf("base ref = %q, want HEAD", patch.BaseRef)
+	}
+	if patch.Worktree != repo {
+		t.Errorf("worktree = %q, want %q", patch.Worktree, repo)
+	}
+	if !strings.Contains(patch.Diff, "new.txt") || !strings.Contains(patch.Diff, "hello world") {
+		t.Errorf("diff does not carry the new file:\n%s", patch.Diff)
+	}
+	if patch.Kind != colony.KindPatch || patch.TaskID != "t1" {
+		t.Errorf("patch header = %+v, want kind patch task t1", patch.Header)
+	}
+}
+
+// TestDetachmentPatchNoChangesFails proves an empty diff is a failure, not a
+// no-op patch: a worker briefed to change something that touched nothing did
+// not do its job, so the claim should fail rather than reconcile nothing.
+func TestDetachmentPatchNoChangesFails(t *testing.T) {
+	d := patchDetachment(t, patchWorktree(t))
+	if _, err := d.harvest(); err == nil {
+		t.Fatal("harvest of an unchanged worktree should fail")
+	}
+}
+
+// TestDetachmentPatchNeedsWorktree proves a patch brief with no cwd fails
+// cleanly rather than diffing the process working directory.
+func TestDetachmentPatchNeedsWorktree(t *testing.T) {
+	d, err := NewDetachment(DetachConfig{
+		Card: colony.WorkerCard(),
+		Brief: colony.TaskBrief{
+			Header:      colony.Header{ID: "b1", Kind: colony.KindTaskBrief, From: "queen", TaskID: "t1"},
+			Goal:        "add a file",
+			Deliverable: colony.KindPatch,
+		},
+		Provider: scripted.New(),
+		Model:    "fable-test",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.harvest(); err == nil {
+		t.Fatal("patch harvest with no cwd should fail")
 	}
 }

@@ -38,6 +38,8 @@ type Detachment struct {
 	store   session.Store
 	loop    *agent.Loop
 	file    string
+	cwd     string // where the worker ran; the worktree for a patch task
+	baseRef string // the ref a patch is diffed against, "" defaults to HEAD
 
 	lastText string // the most recent assistant text, harvested into the handoff
 }
@@ -56,6 +58,10 @@ type DetachConfig struct {
 	Provider provider.Provider
 	Model    string
 	Cwd      string
+	// BaseRef is the ref a patch deliverable is diffed against, the commit the
+	// worker's worktree branched from. Empty defaults to HEAD, which is the
+	// worktree's own base after Create. It is unused for a finding.
+	BaseRef string
 }
 
 // NewDetachment builds a colony worker over the six core tools narrowed to the
@@ -83,6 +89,8 @@ func NewDetachment(cfg DetachConfig) (*Detachment, error) {
 		board:   cfg.Board,
 		store:   cfg.Store,
 		file:    cfg.Card.ID + "." + cfg.Brief.TaskID,
+		cwd:     cfg.Cwd,
+		baseRef: cfg.BaseRef,
 	}
 	d.loop = &agent.Loop{
 		Provider: cfg.Provider,
@@ -205,8 +213,8 @@ func (d *Detachment) prompt() string {
 // harvest reduces the finished run to the typed handoff the brief asked for.
 // The worker's result is a Finding or a Patch, never the transcript that
 // produced it, which is the reduction that keeps ants from drowning in each
-// other's context (doc 09 section 3.2). Patch construction needs a worktree
-// diff, which slice 12 builds, so until then only a Finding is producible here.
+// other's context (doc 09 section 3.2). A patch is the diff the worker left in
+// its isolated worktree; reconcile replays it against the live tree later.
 func (d *Detachment) harvest() (colony.Handoff, error) {
 	hdr := colony.Header{
 		ID:        "h-" + session.NewID(),
@@ -232,9 +240,45 @@ func (d *Detachment) harvest() (colony.Handoff, error) {
 			Evidence:   evidence,
 			Confidence: 0.5,
 		}, nil
+	case colony.KindPatch:
+		return d.harvestPatch(hdr)
 	default:
-		return nil, fmt.Errorf("deliverable %q is not producible before worktree isolation (slice 12)", d.brief.Deliverable)
+		return nil, fmt.Errorf("deliverable %q has no harvest path", d.brief.Deliverable)
 	}
+}
+
+// harvestPatch captures the diff the worker left in its worktree. It stages
+// everything first so new and deleted files land in the diff, then diffs the
+// index against the base ref. An empty diff is a failure, not a no-op patch: a
+// worker briefed to produce a change that touched nothing did not do its job,
+// and the board should see the claim fail rather than reconcile a no-op.
+func (d *Detachment) harvestPatch(hdr colony.Header) (colony.Handoff, error) {
+	if d.cwd == "" {
+		return nil, fmt.Errorf("a patch needs a worktree and the detachment ran with no cwd")
+	}
+	base := d.baseRef
+	if base == "" {
+		base = "HEAD"
+	}
+	ctx := context.Background()
+	git := gitRunner{}
+	if _, err := git.Run(ctx, d.cwd, "git", "add", "-A"); err != nil {
+		return nil, fmt.Errorf("staging the worktree: %w", err)
+	}
+	diff, err := git.Run(ctx, d.cwd, "git", "diff", "--cached", base)
+	if err != nil {
+		return nil, fmt.Errorf("diffing the worktree against %s: %w", base, err)
+	}
+	if strings.TrimSpace(diff) == "" {
+		return nil, fmt.Errorf("worker %s produced no changes for patch task %s", d.card.ID, d.brief.TaskID)
+	}
+	return colony.Patch{
+		Header:   hdr,
+		Worktree: d.cwd,
+		BaseRef:  base,
+		Diff:     diff,
+		Notes:    d.lastText,
+	}, nil
 }
 
 // briefCitations turns the brief's context refs and file anchors into the
