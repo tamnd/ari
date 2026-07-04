@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/tamnd/ari/memory"
 	"github.com/tamnd/ari/memory/sqlite"
 )
 
@@ -45,6 +47,15 @@ type Consolidator struct {
 	repo    Repo
 	clock   func() time.Time
 	running atomic.Bool
+
+	// idxMu guards the per-namespace pinned index cache. The cache is the one
+	// thing the prompt assembler reads for block two's pinned slot, and only the
+	// consolidator writes it: cold on first read, then rebuilt at each fold
+	// boundary and never on a turn, so the prompt prefix is byte-identical
+	// between folds and the cache_control discount holds (D14).
+	idxMu   sync.RWMutex
+	indexes map[string]string
+	cap     memory.IndexCap
 }
 
 // Option configures a consolidator at construction. Options keep New's required
@@ -69,7 +80,14 @@ func WithClock(now func() time.Time) Option {
 // set, is called once per folded namespace with the fold's report so the loop
 // can put a memory.folded event on the bus; pass nil to fold silently.
 func New(store *sqlite.Store, sum Summarizer, emit func(FoldReport), opts ...Option) *Consolidator {
-	c := &Consolidator{store: store, sum: sum, emit: emit, clock: time.Now}
+	c := &Consolidator{
+		store:   store,
+		sum:     sum,
+		emit:    emit,
+		clock:   time.Now,
+		indexes: map[string]string{},
+		cap:     memory.DefaultIndexCap,
+	}
 	for _, opt := range opts {
 		opt(c)
 	}
@@ -198,6 +216,14 @@ func (c *Consolidator) FoldNamespace(ctx context.Context, ns string) (FoldReport
 			report.Demoted++
 		}
 	}
+
+	// A fold is the only boundary the pinned index is rebuilt at, so the prompt
+	// prefix changes exactly here and stays byte-identical until the next fold.
+	idx, err := c.rebuildIndex(ctx, ns)
+	if err != nil {
+		return report, err
+	}
+	report.IndexLines = indexLineCount(idx)
 	return report, nil
 }
 
