@@ -2,13 +2,16 @@ package ant
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/tamnd/ari/colony"
 	"github.com/tamnd/ari/config"
 	"github.com/tamnd/ari/core"
+	"github.com/tamnd/ari/event"
 	"github.com/tamnd/ari/provider"
 	"github.com/tamnd/ari/provider/scripted"
 )
@@ -121,7 +124,7 @@ func TestDispatchRunsSubtasksConcurrently(t *testing.T) {
 	}
 	parent, plan := surveyPlan(t, root)
 
-	res, err := r.dispatch(ctx, c.Store(), sid, parent, plan)
+	res, err := r.dispatch(ctx, c.Store(), sid, "t1", parent, plan)
 	if err != nil {
 		t.Fatalf("dispatch: %v", err)
 	}
@@ -149,6 +152,81 @@ func TestDispatchRunsSubtasksConcurrently(t *testing.T) {
 	}
 }
 
+// TestDispatchEmitsWorkerLifecycle proves the colony narrates itself: every
+// subtask a fan-out runs announces a worker woke before it runs, a progress
+// tick carrying its metered spend, and a finished settling the lane. The view
+// projects those events, so a colony that does not emit them is a panel that is
+// always empty. Keyed by task because two foragers claim opportunistically, so
+// one may run both subtasks; the tasks are what must each be narrated.
+func TestDispatchEmitsWorkerLifecycle(t *testing.T) {
+	root := t.TempDir()
+	r, c := openDispatchColony(t, root, twoFinishes())
+	ctx := context.Background()
+	sub, err := c.Events(ctx, core.EventFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sid, err := c.NewSession(ctx, core.NewSessionRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	parent, plan := surveyPlan(t, root)
+	if _, err := r.dispatch(ctx, c.Store(), sid, "t1", parent, plan); err != nil {
+		t.Fatalf("dispatch: %v", err)
+	}
+
+	woke := map[string]bool{}
+	finished := map[string]bool{}
+	progress := map[string]bool{}
+	deadline := time.After(10 * time.Second)
+drain:
+	for len(finished) < 2 {
+		select {
+		case e := <-sub.C:
+			switch e.Type {
+			case event.TypeWorkerWoke:
+				var w event.WorkerWoke
+				if err := json.Unmarshal(e.Payload, &w); err != nil {
+					t.Fatal(err)
+				}
+				if w.Ant == "" || w.Tier == "" {
+					t.Errorf("worker woke on task %s with ant %q tier %q", w.Task, w.Ant, w.Tier)
+				}
+				woke[w.Task] = true
+			case event.TypeColonyProgress:
+				var p event.ColonyProgress
+				if err := json.Unmarshal(e.Payload, &p); err != nil {
+					t.Fatal(err)
+				}
+				progress[p.Task] = true
+			case event.TypeWorkerFinished:
+				var w event.WorkerFinished
+				if err := json.Unmarshal(e.Payload, &w); err != nil {
+					t.Fatal(err)
+				}
+				if !w.OK {
+					t.Errorf("worker on task %s finished not-ok", w.Task)
+				}
+				finished[w.Task] = true
+			}
+		case <-deadline:
+			break drain
+		}
+	}
+
+	for _, task := range []string{"sub-a", "sub-b"} {
+		if !woke[task] {
+			t.Errorf("no worker woke event for %s", task)
+		}
+		if !progress[task] {
+			t.Errorf("no progress tick for %s", task)
+		}
+		if !finished[task] {
+			t.Errorf("no worker finished event for %s", task)
+		}
+	}
+}
+
 // TestDispatchFoldsTrailFitness proves the fitness feedback edge: when a
 // fan-out's surveys finish, each subtask's cost and outcome fold into the
 // trails, so a fresh colony that starts with no cost history has a survey mean
@@ -171,7 +249,7 @@ func TestDispatchFoldsTrailFitness(t *testing.T) {
 		t.Fatal(err)
 	}
 	parent, plan := surveyPlan(t, root)
-	if _, err := r.dispatch(ctx, c.Store(), sid, parent, plan); err != nil {
+	if _, err := r.dispatch(ctx, c.Store(), sid, "t1", parent, plan); err != nil {
 		t.Fatalf("dispatch: %v", err)
 	}
 

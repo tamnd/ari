@@ -9,6 +9,7 @@ import (
 
 	"github.com/tamnd/ari/colony"
 	"github.com/tamnd/ari/core"
+	"github.com/tamnd/ari/event"
 	"github.com/tamnd/ari/session"
 )
 
@@ -32,7 +33,7 @@ type DispatchResult struct {
 // edge back to the parent lands with the reconcile slice; here the trust rides
 // on the row directly so a labeled request cannot launder its labels through a
 // fan-out.
-func (r *Runner) dispatch(ctx context.Context, store session.Store, sessionID core.SessionID, parent colony.TaskBrief, plan *colony.FanOutPlan) (DispatchResult, error) {
+func (r *Runner) dispatch(ctx context.Context, store session.Store, sessionID core.SessionID, turn core.TurnID, parent colony.TaskBrief, plan *colony.FanOutPlan) (DispatchResult, error) {
 	childTasks := make([]string, 0, len(plan.Subtasks))
 	for _, s := range plan.Subtasks {
 		if _, err := r.board.Post(ctx, colony.Entry{
@@ -73,7 +74,7 @@ func (r *Runner) dispatch(ctx context.Context, store session.Store, sessionID co
 	for i := range plan.Subtasks {
 		antID := fmt.Sprintf("forager-%d", i)
 		wg.Go(func() {
-			if err := r.forage(ctx, store, sessionID, antID, baseRef); err != nil {
+			if err := r.forage(ctx, store, sessionID, turn, antID, baseRef); err != nil {
 				mu.Lock()
 				errs = append(errs, err)
 				mu.Unlock()
@@ -158,7 +159,7 @@ func (r *Runner) reconcile(ctx context.Context, sessionID core.SessionID, baseRe
 // to a card, because the ant it embodies is chosen per claim from the brief it
 // took, which is how the same idle worker can run a survey subtask on one claim
 // and a different one on the next (doc 09 section 5).
-func (r *Runner) forage(ctx context.Context, store session.Store, sessionID core.SessionID, antID, baseRef string) error {
+func (r *Runner) forage(ctx context.Context, store session.Store, sessionID core.SessionID, turn core.TurnID, antID, baseRef string) error {
 	for {
 		entry, ok, err := r.board.Claim(ctx, antID, colony.ClaimFilter{SessionID: string(sessionID)})
 		if err != nil {
@@ -172,7 +173,7 @@ func (r *Runner) forage(ctx context.Context, store session.Store, sessionID core
 			_ = r.board.Fail(ctx, entry.ID)
 			return fmt.Errorf("claimed goal %s did not carry a task brief", entry.ID)
 		}
-		if err := r.runSubtask(ctx, store, sessionID, entry.ID, brief, baseRef); err != nil {
+		if err := r.runSubtask(ctx, store, sessionID, turn, antID, entry.ID, brief, baseRef); err != nil {
 			return err
 		}
 	}
@@ -184,7 +185,7 @@ func (r *Runner) forage(ctx context.Context, store session.Store, sessionID core
 // same routing a foreground request does. The detachment posts its own result
 // and completes the claim; a run error leaves the claim failed for the board to
 // see (doc 09 sections 5 and 5.1).
-func (r *Runner) runSubtask(ctx context.Context, store session.Store, sessionID core.SessionID, claimID string, brief colony.TaskBrief, baseRef string) error {
+func (r *Runner) runSubtask(ctx context.Context, store session.Store, sessionID core.SessionID, turn core.TurnID, worker, claimID string, brief colony.TaskBrief, baseRef string) error {
 	antID := brief.DirectedTo
 	if antID == "" {
 		a, err := r.queen.Assign(ctx, brief)
@@ -201,6 +202,18 @@ func (r *Runner) runSubtask(ctx context.Context, store session.Store, sessionID 
 	if err != nil {
 		return fmt.Errorf("resolving tier %s for %s: %w", card.Tier, antID, err)
 	}
+
+	// A worker announces itself alive before it runs, so the colony view is
+	// never wrong about who is awake (doc 09, doc 02 section 10.5, D18). The
+	// forager lane is the ant's identity here, not the card it embodies, so two
+	// siblings running the same card show as two live ants rather than collapsing
+	// into one row. It rides the must-deliver lane through r.emit, the same
+	// stream the fan-out decision rides.
+	_ = r.emit(event.TypeWorkerWoke, string(sessionID), string(turn), event.WorkerWoke{
+		Ant:  worker,
+		Task: brief.TaskID,
+		Tier: string(card.Tier),
+	})
 
 	// A writer runs in its own detached worktree at the shared base, so two
 	// siblings editing the same tree cannot corrupt each other and each one's
@@ -238,6 +251,23 @@ func (r *Runner) runSubtask(ctx context.Context, store session.Store, sessionID 
 		return fmt.Errorf("building the worker for subtask %s: %w", brief.TaskID, err)
 	}
 	runErr := d.Run(ctx)
+
+	// The worker's final spend rides the lossy lane: a dropped tick is not a
+	// correctness problem and the finish that follows supersedes it, but when it
+	// lands the view shows the tokens to the number the ledger metered (D18). The
+	// finish then settles the lane on the must-deliver lane so a done worker is
+	// never left showing awake.
+	_ = r.emit(event.TypeColonyProgress, string(sessionID), string(turn), event.ColonyProgress{
+		Ant:    worker,
+		Task:   brief.TaskID,
+		Tokens: d.Tokens(),
+	})
+	_ = r.emit(event.TypeWorkerFinished, string(sessionID), string(turn), event.WorkerFinished{
+		Ant:  worker,
+		Task: brief.TaskID,
+		OK:   runErr == nil,
+	})
+
 	r.recordTrail(ctx, card, brief, d.Tokens(), runErr == nil)
 	return runErr
 }

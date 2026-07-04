@@ -91,7 +91,7 @@ func (r *Runner) fanOut(ctx context.Context, t *core.TurnHandle, brief colony.Ta
 		Projected:      plan.Arg.Projected,
 		Remaining:      plan.Arg.Remaining,
 	})
-	res, err := r.dispatch(ctx, t.Store, t.Session, brief, plan)
+	res, err := r.dispatch(ctx, t.Store, t.Session, t.Turn, brief, plan)
 	if err != nil {
 		r.logDebug(t, "fan-out dispatch: "+err.Error())
 	}
