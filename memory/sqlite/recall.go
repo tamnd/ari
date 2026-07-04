@@ -30,11 +30,34 @@ var (
 	parkWRecency    = 1.0
 	parkWImportance = 1.0
 	parkWRelevance  = 1.0
-	// recencyHalfLifeDays sets the per-day decay base: a memory not touched in
-	// this many days has half the recency of one touched today, before min-max
-	// normalization across the candidate set.
+	// recencyHalfLifeDays sets the per-day decay base for a normal row: one not
+	// touched in this many days has half the recency of one touched today,
+	// before min-max normalization across the candidate set. A fast row decays
+	// far quicker and a pinned row does not decay at all, so the evaporation
+	// clock is the ttl_class, not one rate for every row (doc 07, D11).
 	recencyHalfLifeDays = 30.0
+	fastHalfLifeDays    = 1.0
 )
+
+// staleWeight is the factor a demoted row's Park score is multiplied by, so a
+// memory the invalidation pass marked stale sinks below its live peers without
+// being dropped. The demotion is reversible: clearing the flag restores the
+// full score (D11, research recommendation 6).
+const staleWeight = 0.5
+
+// halfLifeDays is the recency half-life for a ttl class. A pinned row returns
+// positive infinity, which makes its recency term a constant one: it never
+// evaporates, because the consolidator re-justifies it at each fold instead.
+func halfLifeDays(ttlClass string) float64 {
+	switch ttlClass {
+	case TTLFast, TTLSession:
+		return fastHalfLifeDays
+	case TTLPinned:
+		return math.Inf(1)
+	default:
+		return recencyHalfLifeDays
+	}
+}
 
 // scored carries a candidate row through fusion and ranking: its raw Park
 // components before normalization, and the final Park score after.
@@ -94,10 +117,15 @@ func (s *Store) recallAt(ctx context.Context, ns, query string, queryVec []float
 		if age < 0 {
 			age = 0
 		}
+		half := halfLifeDays(m.TTLClass)
+		recencyRaw := 1.0 // a pinned row's half-life is infinite: no decay
+		if !math.IsInf(half, 1) {
+			recencyRaw = math.Pow(0.5, age/half)
+		}
 		cands = append(cands, scored{
 			m:          m,
 			relevance:  relevance[m.ID],
-			recencyRaw: math.Pow(0.5, age/recencyHalfLifeDays),
+			recencyRaw: recencyRaw,
 		})
 	}
 	rankByPark(cands)
@@ -266,6 +294,9 @@ func rankByPark(cands []scored) {
 		rec := norm(cands[i].recencyRaw, recLo, recHi)
 		imp := norm(float64(cands[i].m.Importance), impLo, impHi)
 		cands[i].park = parkWRelevance*rel + parkWRecency*rec + parkWImportance*imp
+		if cands[i].m.Stale {
+			cands[i].park *= staleWeight
+		}
 	}
 	sort.SliceStable(cands, func(i, j int) bool {
 		if cands[i].park != cands[j].park {
@@ -330,7 +361,7 @@ func (s *Store) loadMemories(ctx context.Context, ids []string) ([]Memory, error
 			SELECT id, namespace, kind, label, body, COALESCE(embed_model, ''),
 			       importance, created_at, accessed_at, access_count,
 			       source_ant, COALESCE(source_task, ''), COALESCE(anchor_commit, ''),
-			       ttl_class, read_only, pinned
+			       ttl_class, read_only, pinned, stale
 			FROM memories WHERE id IN (`+ph+`)`, args...)
 		if err != nil {
 			return err
@@ -338,17 +369,18 @@ func (s *Store) loadMemories(ctx context.Context, ids []string) ([]Memory, error
 		defer func() { _ = rows.Close() }()
 		for rows.Next() {
 			var m Memory
-			var readOnly, pinned int
+			var readOnly, pinned, stale int
 			if err := rows.Scan(
 				&m.ID, &m.Namespace, &m.Kind, &m.Label, &m.Body, &m.EmbedModel,
 				&m.Importance, &m.CreatedAt, &m.AccessedAt, &m.AccessCount,
 				&m.SourceAnt, &m.SourceTask, &m.AnchorCommit,
-				&m.TTLClass, &readOnly, &pinned,
+				&m.TTLClass, &readOnly, &pinned, &stale,
 			); err != nil {
 				return err
 			}
 			m.ReadOnly = readOnly == 1
 			m.Pinned = pinned == 1
+			m.Stale = stale == 1
 			out = append(out, m)
 		}
 		return rows.Err()

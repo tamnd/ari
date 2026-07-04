@@ -193,7 +193,11 @@ func Open(ctx context.Context, dir string, opts ...Option) (*Colony, error) {
 	// cheap tier and reports each folded namespace back onto the stream. The
 	// loop triggers it at idle and session end; until the loop lands, Fold is
 	// the entry point a client or a test drives.
-	c.consolidator = fold.New(c.memory, newCheapSummarizer(c.registry, c.ledger), c.onFolded)
+	var foldOpts []fold.Option
+	if repo := newGitRepo(c.nest.Root); repo != nil {
+		foldOpts = append(foldOpts, fold.WithRepo(repo))
+	}
+	c.consolidator = fold.New(c.memory, newCheapSummarizer(c.registry, c.ledger), c.onFolded, foldOpts...)
 	c.ctx, c.stop = context.WithCancel(context.Background())
 	return c, nil
 }

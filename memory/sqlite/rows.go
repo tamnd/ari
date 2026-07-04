@@ -51,6 +51,7 @@ type Memory struct {
 	TTLClass     string
 	ReadOnly     bool
 	Pinned       bool
+	Stale        bool // demoted by the fold's invalidation pass, downranked in recall
 }
 
 // Anchor ties a memory to a file, symbol, or command, with the content hash
