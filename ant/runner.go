@@ -186,6 +186,17 @@ func (r *Runner) wake(ctx context.Context, t *core.TurnHandle) (*worker, error) 
 	}
 	reg = reg.ForAllowlist(card.Tools)
 
+	// Skills and slash commands are discovered once per session: their
+	// frontmatter feeds the block two listing and the skill tool's resolver,
+	// their bodies stay on disk until an invocation reads one (doc 13 section
+	// 2.5). cwd is the process working directory; the walk stops at the root.
+	cwd, _ := os.Getwd()
+	skills, _ := skill.Discover(skill.Options{
+		Root:      r.nest.Root,
+		Cwd:       cwd,
+		GlobalDir: r.nest.Global,
+	})
+
 	tc := &tool.ToolContext{
 		Cwd:   r.nest.Root,
 		Files: tool.NewFileState(),
@@ -224,6 +235,16 @@ func (r *Runner) wake(ctx context.Context, t *core.TurnHandle) (*worker, error) 
 		headless:    r.headless,
 	}
 	pipe.Resolver = permission.ResolverFunc(w.resolve)
+
+	// The skill tool ships in the binary but is registered only when a
+	// model-visible skill was discovered, so a repo with no skills does not
+	// hand the model a tool it can never use (doc 13 section 2.5).
+	if modelVisibleSkill(skills) {
+		if err := reg.Register(tool.NewSkill(w.skillDeps(reg, skills))); err != nil {
+			return nil, core.Wrap(core.ErrInternal, err, "registering the skill tool")
+		}
+	}
+
 	w.loop = &agent.Loop{
 		Provider: primary.Provider,
 		Model:    primary.Model,
@@ -233,7 +254,7 @@ func (r *Runner) wake(ctx context.Context, t *core.TurnHandle) (*worker, error) 
 			Platform: runtime.GOOS + "/" + runtime.GOARCH,
 			Model:    primary.Model,
 		}),
-		Prefix:  []provider.Message{BlockTwo(r.blockTwoContext(ctx, card, primary.Provider.Caps().MaxContext))},
+		Prefix:  []provider.Message{BlockTwo(r.blockTwoContext(ctx, card, primary.Provider.Caps().MaxContext, skills))},
 		Tools:   reg,
 		TC:      tc,
 		Decide:  w.decide,
@@ -247,7 +268,7 @@ func (r *Runner) wake(ctx context.Context, t *core.TurnHandle) (*worker, error) 
 // blockTwoContext gathers the session-stable inputs for block two: the
 // pinned index from the memory seam when one is wired, ARI.md, and git
 // status at session start (doc 03 section 8).
-func (r *Runner) blockTwoContext(ctx context.Context, card Card, window int) Context {
+func (r *Runner) blockTwoContext(ctx context.Context, card Card, window int, skills []skill.Skill) Context {
 	var c Context
 	if r.Memory != nil {
 		if idx, err := r.Memory.PinnedIndex(ctx, card.State.Namespace); err == nil {
@@ -265,34 +286,19 @@ func (r *Runner) blockTwoContext(ctx context.Context, card Card, window int) Con
 		Root:      r.nest.Root,
 		GlobalDir: r.nest.Global,
 	})
-	// Skills and slash commands are discovered from the three layers, their
-	// frontmatter read but their bodies left on disk until invoked. Only the
-	// name-plus-one-line listing rides block two, capped to a slice of the
-	// window so a big skill directory cannot crowd out the conversation (doc
-	// 13 section 2.5). Bodies arrive at invocation, the next slice.
-	c.Skills = r.skillListing(cwd, window)
+	// Only the name-plus-one-line listing of the discovered skills rides
+	// block two, capped to a slice of the window so a big skill directory
+	// cannot crowd out the conversation (doc 13 section 2.5). The bodies stay
+	// on disk until the skill tool invokes one.
+	if len(skills) > 0 {
+		c.Skills, _ = skill.RenderList(skills, skill.Budget(window), estimateTokens)
+	}
 	status := r.GitStatus
 	if status == nil {
 		status = gitStatus
 	}
 	c.GitStatus = status(r.nest.Root)
 	return c
-}
-
-// skillListing discovers the installed skills and renders the budgeted
-// listing block two carries. A discovery warning is surfaced through the
-// event stream elsewhere; here a broken skill simply does not list.
-func (r *Runner) skillListing(cwd string, window int) string {
-	found, _ := skill.Discover(skill.Options{
-		Root:      r.nest.Root,
-		Cwd:       cwd,
-		GlobalDir: r.nest.Global,
-	})
-	if len(found) == 0 {
-		return ""
-	}
-	block, _ := skill.RenderList(found, skill.Budget(window), estimateTokens)
-	return block
 }
 
 // gitStatus is the default git probe: branch plus porcelain entries,
@@ -424,4 +430,120 @@ func (w *worker) decide(ctx context.Context, tl tool.Tool, input json.RawMessage
 	default:
 		return agent.Verdict{Allow: false, Reason: d.Message}
 	}
+}
+
+// modelVisibleSkill reports whether any discovered skill is reachable by the
+// model, so the skill tool is only handed to it when there is something to
+// invoke. A disable-model-invocation skill is user-only and does not count.
+func modelVisibleSkill(skills []skill.Skill) bool {
+	for i := range skills {
+		if !skills[i].ModelHidden {
+			return true
+		}
+	}
+	return false
+}
+
+// skillDeps wires the skill tool to this session's discovered set and its
+// permission-gated seams. The matcher and the inline runner both close over
+// the worker's pipeline, so a skill's own commands face the same doc 05
+// decision the model's do (doc 13 section 2.7).
+func (w *worker) skillDeps(reg *tool.Registry, skills []skill.Skill) tool.SkillDeps {
+	byName := make(map[string]*skill.Skill, len(skills))
+	names := make([]string, 0, len(skills))
+	for i := range skills {
+		s := &skills[i]
+		byName[s.Name] = s
+		names = append(names, s.Name)
+	}
+	sh, _ := reg.Resolve("sh")
+	return tool.SkillDeps{
+		Lookup:  func(name string) (*skill.Skill, bool) { s, ok := byName[name]; return s, ok },
+		Names:   func() []string { return names },
+		Matcher: func(s *skill.Skill) skill.Matcher { return w.allowedToolsMatcher(sh, s.AllowedTools) },
+		Inline:  w.inlineRunner(sh),
+		Grant:   w.grantSkillRules,
+		// Untrusted-content sessions (D19) arrive with automation in M5; the
+		// flag is threaded here so the rule is enforced the moment it exists.
+		Trusted: true,
+	}
+}
+
+// allowedToolsMatcher builds gate one of the inline-shell pass: a command is
+// permitted only when one of the skill's declared sh rules covers it, using
+// the same sh normalization the pipeline uses, so a skill cannot smuggle a
+// second command past a narrow allowance (doc 13 section 2.7).
+func (w *worker) allowedToolsMatcher(sh tool.Tool, allowed []string) skill.Matcher {
+	rules, err := permission.ParseAll(allowed, permission.LayerSession)
+	if err != nil || sh == nil {
+		return func(string) bool { return false }
+	}
+	return func(cmd string) bool {
+		input, err := shInput(cmd)
+		if err != nil {
+			return false
+		}
+		pm := sh.MatchPrefix(input)
+		for _, r := range rules {
+			if r.Pattern.Tool == "sh" && pm.Matches(r.Pattern) {
+				return true
+			}
+		}
+		return false
+	}
+}
+
+// inlineRunner is gate two: it submits an inline command as a normal sh call
+// so every stage of doc 05, the bypass-immune safety floor included, still
+// decides before anything runs. A denied or ask decision returns an error, so
+// the inline pass leaves the command as literal text.
+func (w *worker) inlineRunner(sh tool.Tool) skill.InlineRunner {
+	if sh == nil {
+		return nil
+	}
+	return func(ctx context.Context, cmd string) (string, error) {
+		input, err := shInput(cmd)
+		if err != nil {
+			return "", err
+		}
+		d := w.pipe.Decide(ctx, permission.Call{
+			Tool:    sh,
+			Input:   input,
+			TC:      w.tc,
+			CallID:  "skill-inline",
+			Session: w.session,
+			Turn:    w.turnID,
+			Cwd:     w.tc.Cwd,
+		})
+		if d.Behavior != permission.Allow {
+			return "", fmt.Errorf("the permission pipeline did not allow it: %s", d.Message)
+		}
+		in := input
+		if d.UpdatedInput != nil {
+			in = d.UpdatedInput
+		}
+		res, err := sh.Call(ctx, in, w.tc, nil)
+		if err != nil {
+			return "", err
+		}
+		return res.Model, nil
+	}
+}
+
+// grantSkillRules applies a skill's allowed-tools as session allow rules, so
+// the skill's own commands pass the pipeline without a prompt for each one.
+// They narrow what the skill may ask for; they never widen the session, since
+// the deny and safety stages still run ahead of the allow stage (doc 13
+// section 2.5).
+func (w *worker) grantSkillRules(_ string, rules []string) {
+	parsed, err := permission.ParseAll(rules, permission.LayerSession)
+	if err != nil {
+		return
+	}
+	w.pipe.AddAllow(parsed...)
+}
+
+// shInput builds the sh tool's argument object for one command.
+func shInput(cmd string) (json.RawMessage, error) {
+	return json.Marshal(map[string]string{"command": cmd})
 }
