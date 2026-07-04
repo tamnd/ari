@@ -75,6 +75,7 @@ func (l *Loop) compact(ctx context.Context, st *State) {
 
 	if l.microcompact(st) && l.liveTokens(st) < target {
 		st.compactedThisTurn = true
+		st.justCompacted = true
 		l.emit(event.TypeLog, event.Log{
 			Level: "debug",
 			Text:  fmt.Sprintf("compaction rung %s: %d tokens to %d, no summary needed", rungMicrocompact, pre, l.liveTokens(st)),
@@ -210,6 +211,7 @@ func (l *Loop) summarize(ctx context.Context, st *State, pre int) {
 	st.msgs = append(st.msgs, marker, summary)
 	st.boundaryIdx = len(st.msgs) - 2
 	st.compactions++
+	st.justCompacted = true
 	st.consecCompactFail = 0
 	st.pendingErr = nil
 

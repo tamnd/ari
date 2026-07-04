@@ -17,10 +17,63 @@ type Output struct {
 	// post-tool events.
 	AdditionalContext string `json:"additionalContext,omitempty"`
 
-	// Permission is honored only for pre-tool and permission-request, where it
-	// feeds the pipeline. The dispatcher parses it now; the pipeline wiring
-	// lands in the next slice.
+	// Permission is ari's flat way for a pre-tool or permission-request hook
+	// to steer the pipeline. It is honored alongside the Claude Code
+	// hookSpecificOutput shape below; when both are set, Permission wins.
 	Permission *Permission `json:"permission,omitempty"`
+
+	// HookSpecificOutput is the Claude Code shape a PreToolUse hook returns to
+	// steer permission: permissionDecision allow, deny, or ask, an optional
+	// narrowing updatedInput, and a reason. A UserPromptSubmit or SessionStart
+	// hook can also carry additionalContext here (doc 05 section 3).
+	HookSpecificOutput *HookSpecificOutput `json:"hookSpecificOutput,omitempty"`
+}
+
+// HookSpecificOutput is the Claude Code per-event control block. The runner
+// normalizes it onto Permission and AdditionalContext so the rest of the
+// package reads one shape.
+type HookSpecificOutput struct {
+	HookEventName            string          `json:"hookEventName,omitempty"`
+	PermissionDecision       string          `json:"permissionDecision,omitempty"`
+	PermissionDecisionReason string          `json:"permissionDecisionReason,omitempty"`
+	UpdatedInput             json.RawMessage `json:"updatedInput,omitempty"`
+	AdditionalContext        string          `json:"additionalContext,omitempty"`
+}
+
+// perm returns the effective permission steer, preferring the flat
+// Permission field and falling back to the Claude Code hookSpecificOutput
+// block. It returns nil when the hook did not steer permission.
+func (o *Output) perm() *Permission {
+	if o == nil {
+		return nil
+	}
+	if o.Permission != nil {
+		return o.Permission
+	}
+	h := o.HookSpecificOutput
+	if h == nil || h.PermissionDecision == "" {
+		return nil
+	}
+	return &Permission{
+		Behavior:     h.PermissionDecision,
+		UpdatedInput: h.UpdatedInput,
+		Message:      h.PermissionDecisionReason,
+	}
+}
+
+// context returns the additional context the hook wants surfaced, from
+// either the top-level field or the hookSpecificOutput block.
+func (o *Output) context() string {
+	if o == nil {
+		return ""
+	}
+	if o.AdditionalContext != "" {
+		return o.AdditionalContext
+	}
+	if o.HookSpecificOutput != nil {
+		return o.HookSpecificOutput.AdditionalContext
+	}
+	return ""
 }
 
 // Permission is how a pre-tool or permission-request hook steers the pipeline.

@@ -20,6 +20,7 @@ type Payload struct {
 	Result  string          `json:"result,omitempty"`
 	IsError bool            `json:"isError,omitempty"`
 	Prompt  string          `json:"prompt,omitempty"`
+	Reason  string          `json:"reason,omitempty"` // SessionStart/SessionEnd source
 	Session string          `json:"session,omitempty"`
 	Cwd     string          `json:"cwd,omitempty"`
 }
@@ -65,7 +66,11 @@ func runCommand(ctx context.Context, c Command, payload []byte, extraEnv []strin
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 
 	err := cmd.Run()
-	res := Result{Event: c.Event, ExitCode: exitCode(err), Stdout: stdout.String()}
+	// Redact secret env values from stdout before anything reads it, so a
+	// hook that echoes a key cannot leak it into model context through
+	// additionalContext or the raw stdout display (D16).
+	out := redactSecrets(stdout.String(), cmd.Env)
+	res := Result{Event: c.Event, ExitCode: exitCode(err), Stdout: out}
 
 	// A timeout kill is a non-blocking error, not a block and not an allow.
 	if ctx.Err() == context.DeadlineExceeded {
@@ -76,8 +81,8 @@ func runCommand(ctx context.Context, c Command, payload []byte, extraEnv []strin
 
 	switch res.ExitCode {
 	case 0:
-		if out, ok := parseOutput(stdout.Bytes()); ok {
-			res.Output = out
+		if parsed, ok := parseOutput([]byte(out)); ok {
+			res.Output = parsed
 		}
 	case 2:
 		res.Blocking = true

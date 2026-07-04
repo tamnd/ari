@@ -22,24 +22,39 @@ type Verdict struct {
 	Allow        bool
 	UpdatedInput json.RawMessage // non-nil replaces the call's input
 	Reason       string          // model-facing sentence when not allowed
+	Context      string          // a PreToolUse hook's note to surface with the result
 }
 
 // DecideFunc is the permission pipeline seam. Nil means every call is
 // allowed, which only the tests use; the ant always wires the pipeline.
 type DecideFunc func(ctx context.Context, t tool.Tool, input json.RawMessage, callID string) Verdict
 
-// Hooks is the loop's seam to the tool-adjacent hooks. The ant wires it to
-// the trusted hook dispatcher; nil means no hooks, which is the case for an
-// untrusted workspace and for tests. The loop stays free of the hook package:
-// it knows only these two calls and the small result they return.
+// Hooks is the loop's seam to the lifecycle and post-tool hooks. The ant
+// wires it to the trusted hook dispatcher; nil means no hooks, which is the
+// case for an untrusted workspace and for tests. The loop stays free of the
+// hook package: it knows only these calls and the small result they return.
+//
+// PreToolUse does not live here: it steers the permission decision and so
+// runs inside the pipeline seam (DecideFunc), whose Verdict carries any
+// context a PreToolUse hook contributed.
 type Hooks interface {
-	// PreTool runs the pre-tool hooks before the permission decision. A
-	// blocked result stops the call and its Message is fed back to the model.
-	PreTool(ctx context.Context, tool string, input json.RawMessage) HookResult
 	// PostTool runs the post-tool hooks after the tool returns. A blocked
 	// result feeds Message back to the model; otherwise Context is appended to
 	// the tool result. isErr routes to the post-tool-failure event.
 	PostTool(ctx context.Context, tool string, input json.RawMessage, result string, isErr bool) HookResult
+	// PromptSubmit runs UserPromptSubmit as a new human prompt enters the run.
+	// A block rejects the prompt; Context is injected before the model runs.
+	PromptSubmit(ctx context.Context, prompt string) HookResult
+	// SessionStart runs once at the start of a session and again after a
+	// compaction; reason is "startup" or "compact". Context is injected.
+	SessionStart(ctx context.Context, reason string) HookResult
+	// SessionEnd runs when the run reaches its terminal reason. It cannot
+	// change the outcome; it is for cleanup and notification side effects.
+	SessionEnd(ctx context.Context, reason string)
+	// Stop runs when the model finishes with no tool calls. A block asks the
+	// loop to keep working; the loop bounds the number of blocks so a Stop
+	// hook that always blocks cannot spin the loop.
+	Stop(ctx context.Context) HookResult
 }
 
 // HookResult is the loop-facing outcome of a hook fire.
@@ -133,6 +148,12 @@ type State struct {
 	modelRetries      int
 	fellBack          bool
 	reactiveCompacted bool
+
+	// hook lifecycle bookkeeping
+	promptText     string // the prompt this run started with, for UserPromptSubmit
+	sessionStarted bool   // SessionStart(startup) fires once per session
+	justCompacted  bool   // a compaction just landed; SessionStart(compact) is due
+	stopBlocks     int    // Stop hooks that blocked this run, bounded by maxStopBlocks
 
 	// pendingErr parks a recoverable provider error while the loop
 	// decides whether a transition can fix it; it is surfaced only when
@@ -236,6 +257,8 @@ func (l *Loop) Run(ctx context.Context, prompt string) (Outcome, error) {
 	st.pendingErr = nil
 	st.modelRetries, st.outputRetries = 0, 0
 	st.fellBack, st.reactiveCompacted, st.compactedThisTurn = false, false, false
+	st.promptText = prompt
+	st.stopBlocks = 0
 	st.msgs = append(st.msgs, provider.Message{
 		Role:   "user",
 		Blocks: []provider.MsgBlock{{Kind: "text", Text: prompt}},
@@ -253,9 +276,9 @@ func (l *Loop) Run(ctx context.Context, prompt string) (Outcome, error) {
 
 		switch st.next {
 		case transStart:
-			l.start(st)
+			l.start(ctx, st)
 		case transAssemble:
-			l.assemble(st)
+			l.assemble(ctx, st)
 		case transCallModel:
 			l.callModel(ctx, st)
 		case transRunTools:
@@ -263,7 +286,7 @@ func (l *Loop) Run(ctx context.Context, prompt string) (Outcome, error) {
 		case transDrainQueue:
 			l.drainQueue(st)
 		case transStopHooks:
-			l.stopHooks(st)
+			l.stopHooks(ctx, st)
 		case transCompact:
 			l.compact(ctx, st)
 		case transRetryModel:
@@ -273,22 +296,61 @@ func (l *Loop) Run(ctx context.Context, prompt string) (Outcome, error) {
 		case transFallbackModel:
 			l.fallbackModel(st)
 		case transTerminate:
-			return l.finish(st), nil
+			return l.finish(ctx, st), nil
 		}
 	}
 }
 
-func (l *Loop) start(st *State) {
+func (l *Loop) start(ctx context.Context, st *State) {
 	st.turn = 0
 	if l.TC != nil && l.TC.Files == nil {
 		l.TC.Files = tool.NewFileState()
 	}
+	if l.Hooks != nil {
+		if !st.sessionStarted {
+			st.sessionStarted = true
+			if hr := l.Hooks.SessionStart(ctx, "startup"); hr.Context != "" {
+				l.injectContext(st, hr.Context)
+			}
+		}
+		// UserPromptSubmit runs before the model sees the prompt; a block
+		// rejects it outright and its context is injected for the turn.
+		if hr := l.Hooks.PromptSubmit(ctx, st.promptText); hr.Block {
+			l.emit(event.TypeLog, event.Log{Level: "warn", Text: "a UserPromptSubmit hook rejected the prompt"})
+			if hr.Message != "" {
+				l.injectContext(st, hr.Message)
+			}
+			st.term = TermCompleted
+			st.next = transTerminate
+			return
+		} else if hr.Context != "" {
+			l.injectContext(st, hr.Context)
+		}
+	}
 	st.next = transAssemble
+}
+
+// injectContext appends a hook's additional context as a synthetic user
+// message, so the model reads it as part of the turn. It carries no tool
+// call and never widens permissions; it is text only.
+func (l *Loop) injectContext(st *State, text string) {
+	st.msgs = append(st.msgs, provider.Message{
+		Role:   "user",
+		Blocks: []provider.MsgBlock{{Kind: "text", Text: text}},
+	})
 }
 
 // assemble is the between-turn gate: the turn ceiling and the proactive
 // compaction check run here, before any money is spent.
-func (l *Loop) assemble(st *State) {
+func (l *Loop) assemble(ctx context.Context, st *State) {
+	if st.justCompacted {
+		st.justCompacted = false
+		if l.Hooks != nil {
+			if hr := l.Hooks.SessionStart(ctx, "compact"); hr.Context != "" {
+				l.injectContext(st, hr.Context)
+			}
+		}
+	}
 	if st.turn >= l.Limits.maxTurns() {
 		st.term = TermMaxTurns
 		st.next = transTerminate
@@ -311,10 +373,30 @@ func (st *State) setCanceled() {
 	st.term = TermCanceled
 }
 
-// stopHooks is where Stop hooks will run when the model wants to
-// finish (their milestone); in M0 the model finishing is the run
-// finishing.
-func (l *Loop) stopHooks(st *State) {
+// stopHooks runs Stop hooks when the model wants to finish. A Stop hook
+// can block to keep the loop working, but only up to maxStopBlocks times
+// in a run: past that the loop stops anyway and warns, so a hook that
+// always blocks cannot spin the loop (doc 05 section 13, the spiral
+// guard). A block also injects its message so the model knows why it was
+// asked to keep going.
+func (l *Loop) stopHooks(ctx context.Context, st *State) {
+	if l.Hooks != nil {
+		hr := l.Hooks.Stop(ctx)
+		if hr.Block {
+			if st.stopBlocks < maxStopBlocks {
+				st.stopBlocks++
+				if hr.Message != "" {
+					l.injectContext(st, hr.Message)
+				}
+				st.next = transAssemble
+				return
+			}
+			l.emit(event.TypeLog, event.Log{
+				Level: "warn",
+				Text:  "a Stop hook kept blocking; stopping the run anyway to avoid a spin",
+			})
+		}
+	}
 	st.term = TermCompleted
 	st.next = transTerminate
 }
@@ -561,7 +643,10 @@ func (l *Loop) flushLedger(st *State) {
 // finish produces the terminal reason. Recoverable errors were resolved
 // silently along the way; only a reason that means failure publishes an
 // error event, exactly once (doc 03 section 13).
-func (l *Loop) finish(st *State) Outcome {
+func (l *Loop) finish(ctx context.Context, st *State) Outcome {
+	if l.Hooks != nil {
+		l.Hooks.SessionEnd(ctx, string(st.term))
+	}
 	switch st.term {
 	case TermModelError, TermPromptTooLong, TermCompactionFailed:
 		info := event.ErrorInfo{

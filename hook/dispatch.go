@@ -74,7 +74,15 @@ type Outcome struct {
 	Context      string
 	StopContinue *bool
 	StopReason   string
-	Results      []Result
+
+	// Permission is the aggregated steer from PreToolUse hooks, most
+	// restrictive wins: any deny denies, else any ask asks, else the first
+	// allow (which may narrow the input). Nil when no hook steered the call.
+	// A blocking hook also surfaces here as a deny so the pipeline seam can
+	// treat exit 2 and an explicit deny the same way.
+	Permission *Permission
+
+	Results []Result
 }
 
 // Fire runs every hook registered for an event that passes the trust gate and
@@ -116,13 +124,16 @@ func (r *Runner) Fire(ctx context.Context, ev Event, p Payload) Outcome {
 			if msg := strings.TrimSpace(res.Message); msg != "" {
 				blocks = append(blocks, msg)
 			}
+			// A blocking PreToolUse hook is a deny to the permission seam.
+			out.mergePermission(&Permission{Behavior: "deny", Message: strings.TrimSpace(res.Message)})
 		case res.NonBlockingError:
 			// A non-blocking error warns the user and does not touch the model
 			// context; it is collected in Results for the caller to surface.
 		case res.Output != nil:
-			if res.Output.AdditionalContext != "" {
-				contexts = append(contexts, res.Output.AdditionalContext)
+			if cx := res.Output.context(); cx != "" {
+				contexts = append(contexts, cx)
 			}
+			out.mergePermission(res.Output.perm())
 			if res.Output.Continue != nil && !*res.Output.Continue {
 				cont := false
 				out.StopContinue = &cont
@@ -133,6 +144,30 @@ func (r *Runner) Fire(ctx context.Context, ev Event, p Payload) Outcome {
 	out.Message = strings.Join(blocks, "\n\n")
 	out.Context = strings.Join(contexts, "\n\n")
 	return out
+}
+
+// mergePermission folds one hook's permission steer into the aggregate,
+// most restrictive wins: a deny latches, an ask beats an allow, and the
+// first steer at a given rank keeps its message and updatedInput.
+func (out *Outcome) mergePermission(p *Permission) {
+	if p == nil || p.Behavior == "" {
+		return
+	}
+	if out.Permission == nil || permRank(p.Behavior) > permRank(out.Permission.Behavior) {
+		out.Permission = p
+	}
+}
+
+// permRank orders permission behaviors by restrictiveness for aggregation.
+func permRank(behavior string) int {
+	switch behavior {
+	case "deny":
+		return 2
+	case "ask":
+		return 1
+	default:
+		return 0
+	}
 }
 
 // trusts applies the workspace trust gate to one command. A user-layer hook
@@ -172,6 +207,9 @@ func hookEnv(ev Event, p Payload) []string {
 	}
 	if p.Tool != "" {
 		env = append(env, "ARI_TOOL_NAME="+p.Tool)
+	}
+	if p.Reason != "" {
+		env = append(env, "ARI_HOOK_REASON="+p.Reason)
 	}
 	if file := inputPath(p.Input); file != "" {
 		env = append(env, "ARI_TOOL_FILE="+file)

@@ -56,6 +56,11 @@ type Decision struct {
 	// Ask, e.g. "sh(go test:*)". They are proposals, never applied
 	// silently; nothing in the pipeline writes a rule.
 	Suggestions []string
+
+	// HookContext is text a PreToolUse hook asked to surface to the model
+	// before the call runs. It is not a decider; the loop folds it into
+	// the tool result. Empty when no hook contributed context.
+	HookContext string
 }
 
 // Reason explains a Decision. Kind is always set; the other fields are
@@ -90,6 +95,7 @@ const (
 	KindMode    ReasonKind = "mode"    // a mode transform decided
 	KindDefault ReasonKind = "default" // fell through to the default ask
 	KindSubcmd  ReasonKind = "subcmd"  // compound sh; Sub has the breakdown
+	KindHook    ReasonKind = "hook"    // a PreToolUse hook steered the decision
 
 	// KindHeadless is a headless run's resolver of last resort claiming
 	// an Ask with a deny. The default for a headless Ask is deny, never
@@ -111,4 +117,5 @@ const (
 	StageAllow      Stage = "allow"
 	StageDefault    Stage = "default"
 	StageSubcmd     Stage = "subcmd"
+	StageHook       Stage = "hook"
 )

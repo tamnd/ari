@@ -34,8 +34,41 @@ type Pipeline struct {
 	// permission.resolved pair every decision emits (doc 05 section 15).
 	Journal tool.Journal
 
+	// Hook, when set, is the seam to the PreToolUse hook runner. It runs
+	// once per call before the eight stages and steers the decision: it
+	// can deny, narrow the input and allow, or force an ask. The ant wires
+	// it; the permission package never imports hook (doc 05 section 3).
+	Hook HookFunc
+
 	reqID   atomic.Uint64
 	rulesMu sync.RWMutex // guards Rules; parallel reads decide concurrently
+}
+
+// HookVerdict is a PreToolUse hook's steer on a call. Behavior is Allow,
+// Deny, or Ask; the empty string means the hook ran but did not steer the
+// permission decision, only contributed context.
+type HookVerdict struct {
+	Behavior     Behavior
+	UpdatedInput json.RawMessage // narrows the call; a widening input is refused
+	Message      string
+	Context      string // additionalContext to surface to the model
+}
+
+// HookFunc is the pipeline's seam to the PreToolUse hook runner. ok=false
+// means the hook abstained: no hook matched, or the workspace is not
+// trusted so no hook ran at all. The ant wires this to hook.Runner.
+type HookFunc func(ctx context.Context, call Call) (HookVerdict, bool)
+
+// hookState carries a PreToolUse hook's steer into the eight stages. A
+// hook allow becomes a pre-approval the safety floor still vets, exactly
+// like a tool that approves itself at stage 3; a hook ask is honored
+// after the floor so a hook can never ask its way past a safety deny.
+type hookState struct {
+	preApproved  bool
+	forceAsk     bool
+	askMsg       string
+	context      string
+	updatedInput json.RawMessage
 }
 
 // AddAllow appends session-layer allow rules, the durable half of an
@@ -130,11 +163,32 @@ func (p *Pipeline) Decide(ctx context.Context, call Call) Decision {
 }
 
 // decide picks the evaluation shape: per-subcommand for compound sh,
-// one unit otherwise.
+// one unit otherwise. The PreToolUse hook runs first, once for the whole
+// call, and its steer rides the stages as hookState.
 func (p *Pipeline) decide(ctx context.Context, call Call) Decision {
+	call, hs, denied, denyDec := p.applyHook(ctx, call)
+	if denied {
+		return denyDec
+	}
+
+	d := p.decideStages(ctx, call, hs)
+	if hs.context != "" {
+		d.HookContext = hs.context
+	}
+	// A hook that narrowed the input rides that narrowing onto the
+	// decision so the tool runs the narrowed call, not the original. A
+	// later resolver narrowing on an Ask wins over this.
+	if len(hs.updatedInput) > 0 && d.Behavior == Allow && len(d.UpdatedInput) == 0 {
+		d.UpdatedInput = hs.updatedInput
+	}
+	return d
+}
+
+// decideStages runs the eight stages over the right evaluation shape.
+func (p *Pipeline) decideStages(ctx context.Context, call Call, hs hookState) Decision {
 	name := call.Tool.Name()
 	if name != "sh" {
-		return p.evaluate(ctx, unit{call: call, name: name})
+		return p.evaluate(ctx, unit{call: call, name: name}, hs)
 	}
 	subs := tool.ShSplit(shCommand(call.Input))
 	switch len(subs) {
@@ -146,21 +200,67 @@ func (p *Pipeline) decide(ctx context.Context, call Call) Decision {
 			Message:  "the command could not be parsed, so it needs approval",
 		}
 	case 1:
-		return p.evaluate(ctx, unit{call: call, name: name, shSub: &subs[0]})
+		return p.evaluate(ctx, unit{call: call, name: name, shSub: &subs[0]}, hs)
 	}
-	return p.evalShell(ctx, call, subs)
+	return p.evalShell(ctx, call, subs, hs)
+}
+
+// applyHook runs the PreToolUse hook and folds its verdict into a
+// hookState. A deny is final and returns a Decision directly. A narrowing
+// updatedInput is applied to the call; a widening one is refused with a
+// deny, fail closed, the same invariant a resolver faces (doc 05 section
+// 3, D15). Allow and ask ride the stages so the safety floor still vets
+// them: a hook can never approve a write the floor forbids.
+func (p *Pipeline) applyHook(ctx context.Context, call Call) (Call, hookState, bool, Decision) {
+	if p.Hook == nil {
+		return call, hookState{}, false, Decision{}
+	}
+	v, ok := p.Hook(ctx, call)
+	if !ok {
+		return call, hookState{}, false, Decision{}
+	}
+	if v.Behavior == Deny {
+		msg := v.Message
+		if msg == "" {
+			msg = "a hook denied this call"
+		}
+		return call, hookState{}, true, Decision{
+			Behavior: Deny,
+			Reason:   Reason{Kind: KindHook, Stage: StageHook},
+			Message:  msg,
+		}
+	}
+	if len(v.UpdatedInput) > 0 {
+		if !narrows(call.Tool.Name(), call.Input, v.UpdatedInput) {
+			return call, hookState{}, true, Decision{
+				Behavior: Deny,
+				Reason:   Reason{Kind: KindHook, Stage: StageHook, Details: "a hook returned an updated input that widens the call; a hook may only narrow"},
+				Message:  "the hook widened the call, so it was refused",
+			}
+		}
+		call.Input = v.UpdatedInput
+	}
+	hs := hookState{context: v.Context, updatedInput: v.UpdatedInput}
+	switch v.Behavior {
+	case Allow:
+		hs.preApproved = true
+	case Ask:
+		hs.forceAsk = true
+		hs.askMsg = v.Message
+	}
+	return call, hs, false, Decision{}
 }
 
 // evalShell decides a compound sh call by deciding each subcommand and
 // combining: any deny denies the whole call, else any ask asks, else
 // allow. Sub records every subcommand's own reason so the prompt can
 // highlight the piece that triggered the stop.
-func (p *Pipeline) evalShell(ctx context.Context, call Call, subs []tool.ShSub) Decision {
+func (p *Pipeline) evalShell(ctx context.Context, call Call, subs []tool.ShSub, hs hookState) Decision {
 	reasons := make([]SubReason, 0, len(subs))
 	worst := Decision{Behavior: Allow}
 	worstSub := ""
 	for i := range subs {
-		d := p.evaluate(ctx, unit{call: call, name: "sh", shSub: &subs[i]})
+		d := p.evaluate(ctx, unit{call: call, name: "sh", shSub: &subs[i]}, hs)
 		reasons = append(reasons, SubReason{
 			Command:  subs[i].Norm,
 			Behavior: d.Behavior,
@@ -188,8 +288,11 @@ func (p *Pipeline) evalShell(ctx context.Context, call Call, subs []tool.ShSub) 
 // evaluate is the whole pipeline for one unit: eight stages, one early
 // return per stage, no recursion, so the order on the page is the
 // order at runtime (D15, doc 05 section 3).
-func (p *Pipeline) evaluate(ctx context.Context, u unit) Decision {
-	toolPreApproved := false
+func (p *Pipeline) evaluate(ctx context.Context, u unit, hs hookState) Decision {
+	// A hook allow enters as a pre-approval, exactly like a tool that
+	// approves itself at stage 3: it clears at stage 7 but the safety
+	// floor at stage 5 still vets it.
+	toolPreApproved := hs.preApproved
 	rules := p.ruleset()
 
 	// Stage 1: deny rules. A matching deny is final and nothing below
@@ -243,6 +346,17 @@ func (p *Pipeline) evaluate(ctx context.Context, u unit) Decision {
 			Reason:   Reason{Kind: KindSafety, Stage: StageSafety, Rule: v.Rule, Details: v.Path},
 			Message:  v.Message,
 		}
+	}
+
+	// A PreToolUse hook that asked is honored here, below the floor so a
+	// hook can never ask its way past a safety deny, and above the modes
+	// so even full-auto stops to ask when a hook says to.
+	if hs.forceAsk {
+		msg := hs.askMsg
+		if msg == "" {
+			msg = "a hook asked for approval before this call"
+		}
+		return askDecision(Reason{Kind: KindHook, Stage: StageHook}, msg)
 	}
 
 	// Stage 6: mode transforms, last among the deciders, so no early
