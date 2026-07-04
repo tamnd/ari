@@ -127,10 +127,32 @@ func (r *Runner) runSubtask(ctx context.Context, store session.Store, sessionID 
 		Store:    store,
 		Provider: chain[0].Provider,
 		Model:    chain[0].Model,
+		Ledger:   r.ledger,
 		Cwd:      r.nest.Root,
 	})
 	if err != nil {
 		return fmt.Errorf("building the worker for subtask %s: %w", brief.TaskID, err)
 	}
-	return d.Run(ctx)
+	runErr := d.Run(ctx)
+	r.recordTrail(ctx, card, brief, d.Tokens(), runErr == nil)
+	return runErr
+}
+
+// recordTrail folds one finished subtask into the ant's trail: the class it
+// ran, whether it succeeded, and what it cost. This is the fitness feedback the
+// queen routes on and the fan-out cost model projects against, so a colony that
+// runs surveys learns what a survey costs and which ant is good at them (doc 06
+// sections 4 and 5.3). It is best-effort bookkeeping: a trail write failure
+// never fails the task the worker already finished.
+func (r *Runner) recordTrail(ctx context.Context, card colony.Card, brief colony.TaskBrief, tokens int64, success bool) {
+	if r.trails == nil || brief.Class == "" {
+		return
+	}
+	_ = r.trails.Update(ctx, colony.Outcome{
+		Ant:     card.ID,
+		Class:   brief.Class,
+		Success: success,
+		Tokens:  tokens,
+		Embed:   brief.Embed,
+	})
 }
