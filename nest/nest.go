@@ -126,6 +126,11 @@ func (n Nest) ProjectConfig() string { return filepath.Join(n.ProjectDir(), "con
 // LocalConfig is <root>/.ari/local.toml, gitignored, per-user overrides.
 func (n Nest) LocalConfig() string { return filepath.Join(n.ProjectDir(), "local.toml") }
 
+// AntsDir is <root>/.ari/ants, where each ant keeps its card.json and
+// SKILL.md. It sits in the committable project nest, not the state dir,
+// because a card is a git artifact a human reads and edits (doc 06 2.3).
+func (n Nest) AntsDir() string { return filepath.Join(n.ProjectDir(), "ants") }
+
 // ARIMD is <root>/ARI.md, the project memory (D21).
 func (n Nest) ARIMD() string { return filepath.Join(n.Root, "ARI.md") }
 
