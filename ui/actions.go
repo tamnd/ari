@@ -47,6 +47,8 @@ func (m *Model) apply(act dialog.Action) btea.Cmd {
 		return m.memory.Search(v.Query)
 	case memory.Forget:
 		return m.memory.Forget(v.ID, m.session)
+	case colonyDrill:
+		return m.colony.Fetch()
 	case dialog.Closed:
 		if v.ID == "memory" {
 			m.memory.Closed()

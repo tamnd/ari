@@ -40,6 +40,14 @@ func TestListGolden(t *testing.T) {
 	eval.Golden(t, "list", frame(fanout, 48, 12))
 }
 
+// TestSelectedGolden pins the list with the cursor on a row, the frame the user
+// sees while walking the population before drilling in.
+func TestSelectedGolden(t *testing.T) {
+	st := fanout
+	st.Selected = "surveyor-1"
+	eval.Golden(t, "selected", frame(st, 48, 12))
+}
+
 // TestBlockedGolden gives the blocked frame its own golden because a blocked
 // ant with an inline Question is the frame most likely to regress.
 func TestBlockedGolden(t *testing.T) {
