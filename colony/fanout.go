@@ -47,6 +47,16 @@ type FanOutPlan struct {
 	Arg      FanOutArg
 }
 
+// FanOutRefusal names which of the gate's three tests refused a split and why.
+// It is the detail D5's quiet half carries onto the debug lane: a refusal writes
+// nothing to the normal stream, but a human opening the journal at debug level
+// should find which test failed rather than a shrug. It exists only on refusal;
+// an approval returns a plan and a nil refusal (doc 06 section 5, plan 6.2).
+type FanOutRefusal struct {
+	Failed string // "independence" | "workload" | "budget"
+	Reason string
+}
+
 // FanOutGate decides whether a brief may be split across the proposed
 // subtasks. All three tests must pass. It returns the approved plan on success
 // and nil on refusal, and refusal is silent: the caller simply routes the
@@ -58,27 +68,39 @@ type FanOutPlan struct {
 // because a gate that had to think would be a second, slower router with its
 // own failure surface.
 func (q *Queen) FanOutGate(ctx context.Context, sub []TaskBrief, remaining int64) *FanOutPlan {
+	plan, _ := q.FanOutDecide(ctx, sub, remaining)
+	return plan
+}
+
+// FanOutDecide is FanOutGate with the refusal reason exposed. On approval it
+// returns the plan and a nil refusal; on refusal it returns a nil plan and the
+// test that failed, so the caller can whisper colony.fanout.refused onto the
+// debug lane. FanOutGate is the plan-only face of it, for callers that only act
+// on approval. The refusal object is never written to the normal stream: D5's
+// rule that a refusal is silent still holds, and this only makes the debug-level
+// audit trail name the failing test instead of a bare nil.
+func (q *Queen) FanOutDecide(ctx context.Context, sub []TaskBrief, remaining int64) (*FanOutPlan, *FanOutRefusal) {
 	if len(sub) < 2 {
 		// Nothing to fan out: a single subtask is a single-ant task.
-		return nil
+		return nil, &FanOutRefusal{Failed: "independence", Reason: "a single subtask is a single-ant task"}
 	}
 	indBy, ok := independent(sub)
 	if !ok {
-		return nil
+		return nil, &FanOutRefusal{Failed: "independence", Reason: "subtasks are not independent: overlapping anchors or an output-as-input dependency"}
 	}
 	workload, specialist, ok := q.readHeavyOrSpecialist(ctx, sub)
 	if !ok {
-		return nil
+		return nil, &FanOutRefusal{Failed: "workload", Reason: "an interdependent write task with no standout specialist stays single-ant"}
 	}
 	projected, ok := q.project(ctx, sub)
 	if !ok {
 		// The cost model has no history for some class, so the estimate is
 		// uncertain and D5's posture is to refuse rather than gamble the budget.
-		return nil
+		return nil, &FanOutRefusal{Failed: "budget", Reason: "the cost model has no history for a subtask class, so the projection is uncertain"}
 	}
 	projected += q.cfg.CoordinationOverhead * int64(len(sub))
 	if projected > remaining {
-		return nil
+		return nil, &FanOutRefusal{Failed: "budget", Reason: "the projected cost exceeds the remaining session budget"}
 	}
 	return &FanOutPlan{
 		Subtasks: sub,
@@ -90,7 +112,7 @@ func (q *Queen) FanOutGate(ctx context.Context, sub []TaskBrief, remaining int64
 			Projected:      projected,
 			Remaining:      remaining,
 		},
-	}
+	}, nil
 }
 
 // independent is test one: the subtasks do not depend on each other and no two
