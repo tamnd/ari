@@ -366,6 +366,51 @@ func TestRouteDecidedNamesTheWorker(t *testing.T) {
 	}
 }
 
+// TestForegroundOutcomeFoldsIntoTrails proves the foreground turn feeds the
+// same fitness a fan-out subtask does: after a survey the worker answered, the
+// survey class has a positive token mean the fan-out gate can project against.
+// Without this a colony that has never fanned out would have no cost history
+// for any class, and the gate's budget test would refuse every split.
+func TestForegroundOutcomeFoldsIntoTrails(t *testing.T) {
+	root := t.TempDir()
+	done := scripted.Response{Text: "the code starts the server", Usage: provider.Usage{Input: 20, Output: 8}, Stop: "end_turn"}
+	r, c := openDispatchColony(t, root, scripted.New(done))
+	ctx := context.Background()
+
+	// A fresh colony has no survey cost history for the gate to project on.
+	if _, ok, err := r.trails.MeanTokens(ctx, colony.ClassSurvey); err != nil {
+		t.Fatal(err)
+	} else if ok {
+		t.Fatal("survey has a token mean before any turn ran")
+	}
+
+	sub, err := c.Events(ctx, core.EventFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sid, err := c.NewSession(ctx, core.NewSessionRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Submit(ctx, core.SubmitRequest{
+		Session: sid,
+		Text:    "explain how the server starts up",
+		Mode:    core.ModeFullAuto,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	collect(t, sub, event.TypeTurnFinished)
+
+	// The finished survey leaves a positive mean the gate can project.
+	mean, ok, err := r.trails.MeanTokens(ctx, colony.ClassSurvey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok || mean <= 0 {
+		t.Fatalf("survey mean = (%d, %v), want a positive mean after a survey turn", mean, ok)
+	}
+}
+
 // TestPromptPrefixStableAcrossTurns is the D14 cache-alignment test at
 // the session level: across ten turns of one session, the system blocks,
 // the tool definitions, and the block-two message serialize identically;

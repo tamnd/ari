@@ -293,41 +293,54 @@ func (r *Runner) RunTurn(ctx context.Context, t *core.TurnHandle) error {
 	// advisory in M3's single-worker path: the decision is auditable on the
 	// stream, but dispatch still wakes the one session worker below. The slice
 	// that fans out reads this same assignment to decide single versus split.
-	r.route(ctx, t)
+	brief, routed := r.route(ctx, t)
 	w, err := r.workerFor(ctx, t)
 	if err != nil {
 		return err
 	}
-	return w.runTurn(ctx, t)
+	runErr := w.runTurn(ctx, t)
+	// The foreground outcome folds into the trails the same as a background
+	// subtask's does, so a colony that only ever answers foreground requests
+	// still learns what each class costs. Without this the fan-out gate's cost
+	// model would have no history to project against on a colony that has not
+	// yet fanned out, and a split could never be approved (doc 06 sections 4
+	// and 5.3).
+	if routed {
+		r.recordTrail(ctx, w.card, brief, w.turnTokens, runErr == nil && t.Reason == string(agent.TermCompleted))
+	}
+	return runErr
 }
 
 // route runs the intake-then-queen decision for one turn and emits
-// route.decided. It is best-effort: a routing failure is logged, never
-// fatal, because the single worker carries the turn regardless in M3. An
-// empty request has no goal to classify and is skipped.
-func (r *Runner) route(ctx context.Context, t *core.TurnHandle) {
+// route.decided. It returns the brief and whether one was produced, so the
+// caller can fold the turn's outcome into the class trail. It is best-effort:
+// a routing failure is logged, never fatal, because the single worker carries
+// the turn regardless in M3. An empty request has no goal to classify and is
+// skipped.
+func (r *Runner) route(ctx context.Context, t *core.TurnHandle) (colony.TaskBrief, bool) {
 	if strings.TrimSpace(t.Request.Text) == "" {
-		return
+		return colony.TaskBrief{}, false
 	}
 	if err := r.ensureBuiltins(ctx); err != nil {
 		r.logDebug(t, "registering builtins: "+err.Error())
-		return
+		return colony.TaskBrief{}, false
 	}
 	brief, err := r.intake.Foreground(ctx, string(t.Session), string(t.Turn), t.Request.Text, foregroundBudget)
 	if err != nil {
 		r.logDebug(t, "intake: "+err.Error())
-		return
+		return colony.TaskBrief{}, false
 	}
 	a, err := r.queen.Assign(ctx, brief)
 	if err != nil {
 		r.logDebug(t, "routing: "+err.Error())
-		return
+		return colony.TaskBrief{}, false
 	}
 	_ = r.emit(event.TypeRouteDecided, string(t.Session), string(t.Turn), event.RouteDecided{
 		Task: brief.TaskID,
 		Ant:  a.Ant,
 		Why:  a.Reason.Summary,
 	})
+	return brief, true
 }
 
 // logDebug puts a diagnostic line on the stream for a non-fatal colony hiccup.
@@ -467,11 +480,19 @@ func (r *Runner) wake(ctx context.Context, t *core.TurnHandle) (*worker, error) 
 			Platform: runtime.GOOS + "/" + runtime.GOARCH,
 			Model:    primary.Model,
 		}),
-		Prefix:  []provider.Message{BlockTwo(r.withDeferred(r.blockTwoContext(ctx, card, primary.Provider.Caps().MaxContext, skills), deferredMCP))},
-		Tools:   reg,
-		TC:      tc,
-		Decide:  w.decide,
-		Record:  r.ledger.Record,
+		Prefix: []provider.Message{BlockTwo(r.withDeferred(r.blockTwoContext(ctx, card, primary.Provider.Caps().MaxContext, skills), deferredMCP))},
+		Tools:  reg,
+		TC:     tc,
+		Decide: w.decide,
+		// The record seam both meters the colony ledger and sums the turn's
+		// tokens onto the worker, so the foreground outcome folds into the
+		// trails with its real cost. The loop drives one worker on one
+		// goroutine per turn, so the running sum needs no lock (doc 06 section
+		// 4).
+		Record: func(row ledger.Row) {
+			w.turnTokens += int64(row.Usage.Input) + int64(row.Usage.Output)
+			r.ledger.Record(row)
+		},
 		Session: string(t.Session),
 		Tier:    string(card.Tier),
 	}
@@ -720,6 +741,7 @@ type worker struct {
 	asks        Asker
 	headless    bool
 	turnID      string
+	turnTokens  int64       // input plus output metered on the current turn, reset per turn
 	mcp         *mcp.Bridge // nil when no MCP server is configured
 }
 
@@ -774,6 +796,7 @@ func (j rawJournal) Append(e event.Event) event.Event { return j.append(e) }
 // race-free by construction.
 func (w *worker) runTurn(ctx context.Context, t *core.TurnHandle) error {
 	w.turnID = string(t.Turn)
+	w.turnTokens = 0
 	w.loop.Turn = w.turnID
 	w.loop.Emit = t.Emit
 	w.loop.Append = func(e session.Entry) error {
