@@ -45,6 +45,14 @@ type Runner struct {
 	// runs git against the workspace root.
 	GitStatus func(root string) string
 
+	// LSPClient overrides the language-server seam the tools read. Nil
+	// uses the real service built at Bind. It exists so the demo replay
+	// can drive the self-correcting edit loop against a deterministic
+	// diagnostics source instead of a live gopls whose timing would make
+	// a release gate flaky; the real adapter is proven by the LSP fixture
+	// suite (plan 02 slices 5 and 6).
+	LSPClient lsp.LSPClient
+
 	registry *provider.Registry
 	ledger   *ledger.Ledger
 	config   *coreConfig
@@ -244,12 +252,16 @@ func (r *Runner) wake(ctx context.Context, t *core.TurnHandle) (*worker, error) 
 		GlobalDir: r.nest.Global,
 	})
 
+	var lspClient lsp.LSPClient = r.lsp
+	if r.LSPClient != nil {
+		lspClient = r.LSPClient
+	}
 	tc := &tool.ToolContext{
 		Cwd:   r.nest.Root,
 		Files: tool.NewFileState(),
 		Ant:   tool.AntID(card.ID),
 		Spill: tool.NewDiskSpill(filepath.Join(r.nest.ProjectStateDir(), "spill")),
-		LSP:   r.lsp,
+		LSP:   lspClient,
 	}
 
 	home, _ := os.UserHomeDir()
