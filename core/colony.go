@@ -236,6 +236,13 @@ func (c *Colony) Ledger() *ledger.Ledger { return c.ledger }
 // (doc 09 section 6.5, D10).
 func (c *Colony) Memory() *memsqlite.Store { return c.memory }
 
+// Store exposes the session store the colony writes turns to. The runner
+// hands it to a fan-out detachment so a background worker's transcript nests
+// as a sidechain under the spawning session, the same store the foreground
+// turn appends to (doc 09 section 5). It is read-only from outside: only the
+// colony's own turn loop drives the foreground writes.
+func (c *Colony) Store() session.Store { return c.store }
+
 // Emit puts one event on the journal from outside the core package. It is
 // the seam the colony's JournalFunc rides: the kernel names its records as
 // plain strings and the runner's closure lifts them onto the stream as
