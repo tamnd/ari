@@ -29,8 +29,10 @@ type FoldReport struct {
 // its net effect on the namespace, not the fold's internal accounting.
 func (r FoldReport) WirePayload() event.MemoryFolded {
 	return event.MemoryFolded{
-		Namespace: r.Namespace,
-		Merged:    r.Merged,
-		Archived:  r.Demoted + r.Evaporated,
+		Namespace:   r.Namespace,
+		Merged:      r.Merged,
+		Reflections: r.Reflections,
+		Archived:    r.Demoted + r.Evaporated,
+		Candidates:  r.Candidates,
 	}
 }

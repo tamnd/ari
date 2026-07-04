@@ -25,6 +25,10 @@ type fakeClient struct {
 	submits  []string
 	responds [][3]string // session, request id, decision
 	cancels  []string
+	index    string
+	hits     []MemoryHit
+	forgets  [][2]string // session, id
+	forgetOK bool
 }
 
 func (f *fakeClient) NewSession(context.Context, string) (string, error) { return "s1", nil }
@@ -52,6 +56,25 @@ func (f *fakeClient) Respond(_ context.Context, session, id, decision string) er
 	defer f.mu.Unlock()
 	f.responds = append(f.responds, [3]string{session, id, decision})
 	return nil
+}
+
+func (f *fakeClient) MemoryIndex(context.Context) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.index, nil
+}
+
+func (f *fakeClient) MemorySearch(_ context.Context, query string) ([]MemoryHit, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.hits, nil
+}
+
+func (f *fakeClient) MemoryForget(_ context.Context, session, id string) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.forgets = append(f.forgets, [2]string{session, id})
+	return f.forgetOK, nil
 }
 
 // harness owns a root with a controllable clock.

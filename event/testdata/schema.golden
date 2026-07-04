@@ -7,7 +7,7 @@ error: code:string, message:string, retryable:bool, ant?:string, cause?:string
 hello: schema:int, cursor:int, server:string
 ledger.turn: turn:string, model:string, input:int, output:int, cache_read:int, cache_write:int, cost_usd:float, cache_rate:float
 log: level:string, text:string
-memory.folded: namespace:string, merged:int, archived:int
+memory.folded: namespace:string, merged:int, reflections:int, archived:int, candidates:int
 part.text.delta: part:int, text:string
 part.text.end: part:int
 part.thinking.delta: part:int, text:string

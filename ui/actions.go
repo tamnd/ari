@@ -9,6 +9,7 @@ import (
 
 	"github.com/tamnd/ari/ui/dialog"
 	"github.com/tamnd/ari/ui/keys"
+	"github.com/tamnd/ari/ui/memory"
 	"github.com/tamnd/ari/ui/perm"
 	"github.com/tamnd/ari/ui/picker"
 	"github.com/tamnd/ari/ui/splash"
@@ -42,7 +43,14 @@ func (m *Model) apply(act dialog.Action) btea.Cmd {
 	case picker.Chosen:
 		m.overlay.Pop(m.now())
 		return m.applyChoice(v)
+	case memory.Search:
+		return m.memory.Search(v.Query)
+	case memory.Forget:
+		return m.memory.Forget(v.ID, m.session)
 	case dialog.Closed:
+		if v.ID == "memory" {
+			m.memory.Closed()
+		}
 		if m.state == StateOnboarding {
 			// Escaping onboarding is allowed; the shell still works and
 			// the flow returns on the next fresh start.
@@ -191,6 +199,7 @@ func (m *Model) setTheme(name string) {
 	m.sidebar.SetTheme(th)
 	m.status.SetTheme(th)
 	m.perms.SetTheme(th)
+	m.memory.SetTheme(th)
 }
 
 // modelDialog picks from the configured model list.

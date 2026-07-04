@@ -21,6 +21,25 @@ type Client interface {
 
 	// Respond answers a permission request: allow, allow_session, deny.
 	Respond(ctx context.Context, session, requestID, decision string) error
+
+	// MemoryIndex renders the live pinned index the ant carries every turn.
+	MemoryIndex(ctx context.Context) (string, error)
+
+	// MemorySearch runs the same ranked recall the loop runs.
+	MemorySearch(ctx context.Context, query string) ([]MemoryHit, error)
+
+	// MemoryForget archives a memory through the permission pipeline. The
+	// answer arrives as a permission request on the stream, so this blocks
+	// until the user resolves it. It reports whether a row was archived.
+	MemoryForget(ctx context.Context, session, id string) (bool, error)
+}
+
+// MemoryHit is one row a memory search returned, shaped for the panel.
+type MemoryHit struct {
+	ID    string
+	Label string
+	Body  string
+	Stale bool
 }
 
 // SessionInfo is one row of the session switcher.

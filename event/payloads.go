@@ -173,9 +173,15 @@ type RouteDecided struct {
 	Why  string `json:"why"`
 }
 
-// MemoryFolded is defined for the wire schema and unused until M2.
+// MemoryFolded reports one consolidation over one namespace: the net effect
+// on live memory, not the fold's internal accounting. Merged is the live rows
+// the fold wrote and Reflections how many of those were lessons; Archived is
+// the rows it retired for staleness; Candidates is the pending proposals it
+// weighed. A client tails these to show what folding did without a recall.
 type MemoryFolded struct {
-	Namespace string `json:"namespace"`
-	Merged    int    `json:"merged"`
-	Archived  int    `json:"archived"`
+	Namespace   string `json:"namespace"`
+	Merged      int    `json:"merged"`
+	Reflections int    `json:"reflections"`
+	Archived    int    `json:"archived"`
+	Candidates  int    `json:"candidates"`
 }

@@ -11,7 +11,8 @@ import (
 // package declares the interface and never imports core; this file is
 // the one place the two sides meet (D2, the import-graph guard).
 type colonyClient struct {
-	c *core.Colony
+	c  *core.Colony
+	ns string // the worker ant's memory namespace, for the memory panel
 }
 
 func (a colonyClient) NewSession(ctx context.Context, title string) (string, error) {
@@ -47,3 +48,27 @@ func (a colonyClient) Respond(ctx context.Context, session, requestID, decision 
 		Decision:  core.RespondChoice(decision),
 	})
 }
+
+func (a colonyClient) MemoryIndex(ctx context.Context) (string, error) {
+	return a.c.PinnedIndex(ctx, a.ns)
+}
+
+func (a colonyClient) MemorySearch(ctx context.Context, query string) ([]ui.MemoryHit, error) {
+	hits, err := a.c.RecallMemory(ctx, a.ns, query, memorySearchLimit)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]ui.MemoryHit, len(hits))
+	for i, h := range hits {
+		out[i] = ui.MemoryHit{ID: h.ID, Label: h.Label, Body: h.Body, Stale: h.Stale}
+	}
+	return out, nil
+}
+
+func (a colonyClient) MemoryForget(ctx context.Context, session, id string) (bool, error) {
+	return a.c.ForgetMemory(ctx, core.SessionID(session), a.ns, id)
+}
+
+// memorySearchLimit caps how many hits the panel search asks for, the recall
+// tool's own ceiling so the panel and the model see the same ranked top.
+const memorySearchLimit = 20

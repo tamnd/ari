@@ -48,6 +48,7 @@ type Options struct {
 	Models        []string                   // pickable models for the picker
 	ContextWindow int64                      // tokens, for the context fill figure
 	Session       string                     // resume: next turns go here, "" starts fresh
+	Namespace     string                     // the worker ant's memory namespace, for the panel
 	Drops         func() uint64              // the broker's lossy-lane drop counter
 	Onboarded     func(splash.Outcome) error // persists first-run choices
 	Now           func() time.Time           // tests pin this
@@ -76,6 +77,7 @@ type Model struct {
 	sidebar *SidebarController
 	status  *StatusController
 	perms   *PermController
+	memory  *MemoryController
 	onboard *splash.Flow
 }
 
@@ -99,6 +101,7 @@ func New(o Options) *Model {
 	m.sidebar = NewSidebar(o.Theme, o)
 	m.status = NewStatus(o.Theme, o.Keys, o.Now)
 	m.perms = NewPerm(o.Client, o.Theme)
+	m.memory = NewMemory(o.Client, o.Theme, o.Namespace)
 	if o.Session != "" {
 		m.session = o.Session
 		m.state = StateChat
@@ -155,6 +158,23 @@ func (m *Model) Update(msg btea.Msg) (btea.Model, btea.Cmd) {
 		return m, nil
 	case sessionsLoaded:
 		return m, m.applySessions(v)
+	case memIndexLoaded:
+		if v.err != nil {
+			return m, m.status.Notify("error", "memory: "+v.err.Error())
+		}
+		m.memory.OnIndex(v)
+		return m, nil
+	case memResults:
+		if v.err != nil {
+			return m, m.status.Notify("error", "memory search: "+v.err.Error())
+		}
+		m.memory.OnResults(v)
+		return m, nil
+	case memForgot:
+		if v.err != nil {
+			return m, m.status.Notify("error", "forget: "+v.err.Error())
+		}
+		return m, m.memory.OnForgot(v)
 	case bus.PermissionRequestedMsg:
 		m.perms.Request(v, m.overlay, m.now())
 		return m, nil
@@ -179,6 +199,7 @@ func (m *Model) Update(msg btea.Msg) (btea.Model, btea.Cmd) {
 	}
 	m.chat.Apply(msg)
 	m.sidebar.Apply(msg)
+	m.memory.Apply(msg)
 	if m.state == StateLanding && !m.chat.Empty() {
 		m.state = StateChat
 	}
@@ -224,6 +245,8 @@ func (m *Model) global(a keys.Action) btea.Cmd {
 		m.overlay.Push(m.paletteDialog(), m.now())
 	case keys.ThemePick:
 		m.overlay.Push(m.themeDialog(), m.now())
+	case keys.MemoryPanel:
+		return m.memory.Open(m.overlay, m.now())
 	}
 	return nil
 }
