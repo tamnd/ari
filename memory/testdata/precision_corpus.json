@@ -1,0 +1,215 @@
+{
+  "notes": "Seeded recall corpus for the ship-gate precision fixture (spec 2085 slice 12). Each row is one live memory in namespace ant_worker on a distinct programming topic with its own vocabulary; each query names the row it should recall at rank one. Distinct domains keep each row the unique best lexical match, so BM25 alone clears the FTS-only floor and hybrid clears the higher bar. Edit rows and queries together; the fixture asserts at least fifty query-and-expected-row pairs.",
+  "rows": [
+    {
+      "id": "m01",
+      "label": "http client retries with jitter",
+      "body": "Wrap the http client in an exponential backoff with full jitter, cap the retries at five attempts, and only retry idempotent GET and PUT requests.",
+      "file": "retry.go",
+      "queries": ["exponential backoff full jitter for http retries", "how many retry attempts before giving up on a request"]
+    },
+    {
+      "id": "m02",
+      "label": "postgres partial index on active rows",
+      "body": "Add a partial btree index on the orders table filtered to status active, so the planner skips archived rows and the index stays small.",
+      "file": "schema.sql",
+      "queries": ["partial btree index on active orders in postgres", "keep the index small by filtering archived rows out"]
+    },
+    {
+      "id": "m03",
+      "label": "goroutine leak from an unbuffered channel",
+      "body": "A goroutine blocked on send to an unbuffered channel nobody reads leaks forever; give the channel a buffer or add a context cancel to unblock it.",
+      "file": "worker.go",
+      "queries": ["goroutine leaks blocked sending on an unbuffered channel", "unblock a stuck goroutine with a context cancel"]
+    },
+    {
+      "id": "m04",
+      "label": "mutex lock ordering avoids deadlock",
+      "body": "Always acquire the account mutex before the ledger mutex; the reversed order between two transfers is the classic deadlock we hit last quarter.",
+      "file": "transfer.go",
+      "queries": ["always lock the account mutex before the ledger mutex", "deadlock from two transfers taking locks in reversed order"]
+    },
+    {
+      "id": "m05",
+      "label": "compile the regex once at package init",
+      "body": "Compile the email regexp a single time with MustCompile at package init; compiling it per call showed up hot in the cpu profile.",
+      "file": "validate.go",
+      "queries": ["compile the email regexp once at package init", "regexp compiled per call was hot in the cpu profile"]
+    },
+    {
+      "id": "m06",
+      "label": "tls certificate renewal cron",
+      "body": "The lets encrypt certificate renews on a cron thirty days before expiry; a failed renewal pages oncall because the handshake starts rejecting clients.",
+      "file": "tls.go",
+      "queries": ["renew the lets encrypt tls certificate before expiry", "failed certificate renewal makes the handshake reject clients"]
+    },
+    {
+      "id": "m07",
+      "label": "base64 url encoding for tokens",
+      "body": "Encode the session token with base64 url encoding and no padding so it survives a query string; standard base64 breaks on the plus and slash bytes.",
+      "file": "token.go",
+      "queries": ["base64 url encoding no padding for a session token", "standard base64 plus and slash break in a query string"]
+    },
+    {
+      "id": "m08",
+      "label": "validate utf8 before storing",
+      "body": "Reject a request body that is not valid utf8 at the edge; a lone surrogate half slipped into the database and corrupted the json export.",
+      "file": "ingest.go",
+      "queries": ["reject invalid utf8 request bodies at the edge", "a lone surrogate half corrupted the json export"]
+    },
+    {
+      "id": "m09",
+      "label": "semaphore caps concurrent uploads",
+      "body": "A weighted semaphore caps concurrent s3 uploads at ten so a burst of jobs does not exhaust the file descriptors on the box.",
+      "file": "upload.go",
+      "queries": ["weighted semaphore caps concurrent s3 uploads", "a burst of jobs exhausted the file descriptors"]
+    },
+    {
+      "id": "m10",
+      "label": "lru cache eviction by size",
+      "body": "The lru cache evicts by total byte size not entry count, because a few large thumbnails were pinning small entries out of memory.",
+      "file": "cache.go",
+      "queries": ["lru cache evicts by total byte size not entry count", "large thumbnails pinned small cache entries out"]
+    },
+    {
+      "id": "m11",
+      "label": "binary search off by one on the high bound",
+      "body": "The binary search bug was an inclusive high bound; set high to len minus one and loop while low is less than or equal to high.",
+      "file": "search.go",
+      "queries": ["binary search off by one on the inclusive high bound", "set high to len minus one in the search loop"]
+    },
+    {
+      "id": "m12",
+      "label": "parse timestamps as utc not local",
+      "body": "Parse incoming timestamps as utc explicitly; the server defaulted to local time and shifted every event by the daylight saving offset.",
+      "file": "clock.go",
+      "queries": ["parse incoming timestamps as utc not local time", "daylight saving offset shifted every event"]
+    },
+    {
+      "id": "m13",
+      "label": "round money with decimal not float",
+      "body": "Represent money as integer cents or a decimal type; summing float dollars drifted the invoice total by a penny over thousands of lines.",
+      "file": "money.go",
+      "queries": ["represent money as integer cents not float dollars", "summing floats drifted the invoice total by a penny"]
+    },
+    {
+      "id": "m14",
+      "label": "csv writer quotes embedded commas",
+      "body": "The csv writer must quote a field with an embedded comma or newline; a customer address with a comma split into two columns downstream.",
+      "file": "export.go",
+      "queries": ["csv writer quotes a field with an embedded comma", "an address comma split into two columns downstream"]
+    },
+    {
+      "id": "m15",
+      "label": "stream gzip instead of buffering",
+      "body": "Stream the gzip response through an io pipe rather than buffering the whole payload; the full buffer spiked memory on large report downloads.",
+      "file": "gzip.go",
+      "queries": ["stream gzip through an io pipe not a full buffer", "buffering the whole gzip payload spiked memory"]
+    },
+    {
+      "id": "m16",
+      "label": "uuid v7 for time sortable ids",
+      "body": "Switch primary keys to uuid version seven so new rows sort by creation time and the btree index stops fragmenting on random v4 inserts.",
+      "file": "ids.go",
+      "queries": ["uuid version seven for time sortable primary keys", "random v4 inserts fragmented the btree index"]
+    },
+    {
+      "id": "m17",
+      "label": "cron expression runs in the wrong timezone",
+      "body": "The nightly cron ran an hour early after the deploy because the scheduler used the container utc clock instead of the configured business timezone.",
+      "file": "scheduler.go",
+      "queries": ["cron ran an hour early on the container utc clock", "scheduler ignored the configured business timezone"]
+    },
+    {
+      "id": "m18",
+      "label": "connection pool max sized to the database",
+      "body": "Size the database connection pool to the postgres max connections divided by the replica count, or a rolling deploy exhausts the server slots.",
+      "file": "pool.go",
+      "queries": ["size the connection pool to postgres max connections", "a rolling deploy exhausted the database server slots"]
+    },
+    {
+      "id": "m19",
+      "label": "prepared statement stops sql injection",
+      "body": "Bind user input through a prepared statement placeholder; the reported sql injection came from string concatenating a search term into the query.",
+      "file": "query.go",
+      "queries": ["bind user input with a prepared statement placeholder", "sql injection from concatenating a search term"]
+    },
+    {
+      "id": "m20",
+      "label": "wal checkpoint under write load",
+      "body": "Force a sqlite wal checkpoint on a timer under heavy write load, or the wal file grows unbounded and swallows the disk before the passive checkpoint fires.",
+      "file": "wal.go",
+      "queries": ["force a sqlite wal checkpoint on a timer under write load", "the wal file grew unbounded and filled the disk"]
+    },
+    {
+      "id": "m21",
+      "label": "bloom filter skips missing key lookups",
+      "body": "A bloom filter in front of the disk store skips a lookup for a key that certainly does not exist, cutting the read amplification on cache misses.",
+      "file": "bloom.go",
+      "queries": ["bloom filter skips lookups for keys that do not exist", "cut read amplification on cache misses"]
+    },
+    {
+      "id": "m22",
+      "label": "merkle tree verifies a synced range",
+      "body": "Compare merkle tree root hashes between replicas to find a diverged key range without shipping every row across the wire.",
+      "file": "merkle.go",
+      "queries": ["merkle tree root hashes find a diverged key range", "verify a synced range without shipping every row"]
+    },
+    {
+      "id": "m23",
+      "label": "protobuf varint decoding is little endian groups",
+      "body": "A protobuf varint packs seven bits per byte with the high bit as a continuation flag; a truncated stream leaves the continuation set and never terminates.",
+      "file": "varint.go",
+      "queries": ["protobuf varint seven bits per byte continuation flag", "a truncated varint stream never terminates"]
+    },
+    {
+      "id": "m24",
+      "label": "websocket ping keeps the proxy open",
+      "body": "Send a websocket ping every thirty seconds or the load balancer idle timeout closes the connection and the client sees a silent disconnect.",
+      "file": "ws.go",
+      "queries": ["websocket ping every thirty seconds beats the idle timeout", "the load balancer closed the idle websocket connection"]
+    },
+    {
+      "id": "m25",
+      "label": "dns resolution caching in the resolver",
+      "body": "The go resolver does not cache dns by default, so a hot outbound host hammered the dns server; add a short ttl cache in front of the dialer.",
+      "file": "dns.go",
+      "queries": ["the go resolver does not cache dns by default", "a hot host hammered the dns server add a ttl cache"]
+    },
+    {
+      "id": "m26",
+      "label": "arena allocator cuts gc pressure",
+      "body": "Batch the per request scratch buffers into an arena allocator reset at the end of the request so the garbage collector stops scanning short lived junk.",
+      "file": "arena.go",
+      "queries": ["arena allocator reset per request cuts gc pressure", "stop the collector scanning short lived scratch buffers"]
+    },
+    {
+      "id": "m27",
+      "label": "signal handling drains before exit",
+      "body": "Trap sigterm and drain the in flight requests with a grace period before exit, so a kubernetes rollout does not drop live connections mid response.",
+      "file": "signal.go",
+      "queries": ["trap sigterm and drain in flight requests before exit", "a kubernetes rollout dropped live connections mid response"]
+    },
+    {
+      "id": "m28",
+      "label": "rate limiter uses a token bucket",
+      "body": "The public api rate limiter is a token bucket refilled at a steady rate with a burst allowance, keyed per api key in a redis sorted set.",
+      "file": "ratelimit.go",
+      "queries": ["token bucket rate limiter with a burst allowance", "rate limit keyed per api key in a redis sorted set"]
+    },
+    {
+      "id": "m29",
+      "label": "idempotency key dedupes double submits",
+      "body": "Require an idempotency key on the payment endpoint and store the first response, so a client retry after a timeout does not charge the card twice.",
+      "file": "payment.go",
+      "queries": ["idempotency key on the payment endpoint dedupes retries", "a timeout retry charged the card twice without a key"]
+    },
+    {
+      "id": "m30",
+      "label": "pagination by keyset not offset",
+      "body": "Paginate large result sets by keyset on the sorted id rather than sql offset, because a deep offset scans and discards every earlier row.",
+      "file": "paginate.go",
+      "queries": ["keyset pagination on the sorted id not sql offset", "a deep offset scanned and discarded every earlier row"]
+    }
+  ]
+}
