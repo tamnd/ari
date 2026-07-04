@@ -232,6 +232,56 @@ func TestSidechainStaysOutOfMainResume(t *testing.T) {
 	}
 }
 
+func TestLoadSidechainReadsInFileOrder(t *testing.T) {
+	ctx := context.Background()
+	st, _ := New(t.TempDir())
+	id, _ := st.Create(ctx, "", session.SessionMeta{})
+
+	// A worker that never opened its file drills in to nothing, not an error.
+	tr, err := st.LoadSidechain(ctx, id, "forager-0")
+	if err != nil {
+		t.Fatalf("empty sidechain must not error: %v", err)
+	}
+	if len(tr.Entries) != 0 {
+		t.Errorf("an unopened sidechain has no entries, got %d", len(tr.Entries))
+	}
+
+	// A meta line opens the file; the rest are transcript lines in order.
+	meta, _ := json.Marshal(session.Meta{Title: "worker s1 on task t1", Parent: id})
+	if err := st.AppendSidechain(ctx, id, "forager-0", session.Entry{ID: "m0", Type: session.EntryMeta, Body: meta}); err != nil {
+		t.Fatal(err)
+	}
+	for _, txt := range []string{"first", "second", "third"} {
+		if err := st.AppendSidechain(ctx, id, "forager-0", entry(txt, "", txt)); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	tr, err = st.LoadSidechain(ctx, id, "forager-0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tr.Meta.Title != "worker s1 on task t1" {
+		t.Errorf("meta not parsed: title %q", tr.Meta.Title)
+	}
+	if len(tr.Entries) != 3 {
+		t.Fatalf("want 3 entries, got %d", len(tr.Entries))
+	}
+	for i, want := range []string{"first", "second", "third"} {
+		if tr.Entries[i].ID != want {
+			t.Errorf("entry %d out of file order: got %q want %q", i, tr.Entries[i].ID, want)
+		}
+	}
+
+	// One worker's file never bleeds into another's.
+	if other, _ := st.LoadSidechain(ctx, id, "forager-1"); len(other.Entries) != 0 {
+		t.Errorf("forager-1 saw forager-0's entries: %d", len(other.Entries))
+	}
+	if _, err := st.LoadSidechain(ctx, id, "../evil"); err == nil {
+		t.Error("a path separator in an ant name must be rejected")
+	}
+}
+
 func TestListNewestFirst(t *testing.T) {
 	ctx := context.Background()
 	st, _ := New(t.TempDir())
