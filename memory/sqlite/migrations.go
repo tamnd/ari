@@ -100,6 +100,36 @@ func (s *Store) schemaVersion(ctx context.Context) (int, error) {
 	return version, err
 }
 
+// SchemaVersion reports the highest migration version applied to this
+// database, the read-only view the doctor uses to tell a colony at head from
+// one a newer binary already migrated past. A database that predates the
+// schema_migrations table reads as version zero rather than an error, so an
+// empty or foreign SQLite file is reported as unmigrated, not as a failure.
+func (s *Store) SchemaVersion(ctx context.Context) (int, error) {
+	v, err := s.schemaVersion(ctx)
+	if err != nil && strings.Contains(err.Error(), "no such table") {
+		return 0, nil
+	}
+	return v, err
+}
+
+// HeadVersion is the version the embedded migrations bring a colony to, the
+// number SchemaVersion is measured against. It reads the compiled-in migration
+// set, so it needs no open database.
+func HeadVersion() (int, error) {
+	migs, err := loadMigrations()
+	if err != nil {
+		return 0, err
+	}
+	head := 0
+	for _, m := range migs {
+		if m.version > head {
+			head = m.version
+		}
+	}
+	return head, nil
+}
+
 // applyMigration runs one migration's SQL and records its version in the
 // same transaction, so the schema change and the version bump land together
 // or not at all.

@@ -17,7 +17,15 @@ import (
 	"github.com/tamnd/ari/journal"
 	"github.com/tamnd/ari/mcp"
 	"github.com/tamnd/ari/memory"
+	"github.com/tamnd/ari/memory/sqlite"
 )
+
+// walWarnBytes is the size past which the colony's write-ahead log reads as
+// unhealthy. SQLite auto-checkpoints the WAL at about four megabytes, so a WAL
+// far past that means a checkpoint is starved, usually by a reader held open too
+// long. It is a warning, not an error: the data is intact, but the file is
+// growing where it should be folding back into the main database.
+const walWarnBytes = 64 << 20
 
 // checkNestPermissions verifies that the credential directory and the
 // files inside it are not readable by other users on the box. The auth
@@ -341,6 +349,80 @@ func checkProjectMemorySize(ctx *Context) Finding {
 		}
 	}
 	return Finding{Status: StatusOK, Reason: fmt.Sprintf("ARI.md is %d bytes, under the %d-byte cap", info.Size(), memory.DefaultPerFileCap)}
+}
+
+// checkColonyMemory audits the memory substrate M2 added: the colony database.
+// It is the D16 posture applied to the new store. It confirms the database has
+// not leaked into a committable path, that it is at the head schema version this
+// build knows how to run, and that its write-ahead log is not growing unchecked.
+// A fresh install with no colony.db yet is clean; memory writes the file on the
+// first run.
+func checkColonyMemory(ctx *Context) Finding {
+	// The colony database lives in the global state directory, outside the repo.
+	// A colony.db sitting inside the workspace would be committed, and with it
+	// every remembered fact, so a stray one in a committable path is a leak.
+	for _, p := range []string{
+		filepath.Join(ctx.Nest.Root, "colony.db"),
+		filepath.Join(ctx.Nest.ProjectDir(), "colony.db"),
+	} {
+		if fi, err := os.Stat(p); err == nil && !fi.IsDir() {
+			return Finding{
+				Status: StatusCritical,
+				Reason: fmt.Sprintf("a colony.db is inside the workspace at %s, so the colony's memory would be committed", p),
+				Manual: "Delete the in-repo colony.db and add it to .gitignore. The real database lives under the global state directory, not the checkout.",
+			}
+		}
+	}
+
+	path := ctx.Nest.ColonyDB()
+	info, err := os.Stat(path)
+	if os.IsNotExist(err) {
+		return Finding{Status: StatusOK, Reason: "no colony.db yet; memory initializes on the first run"}
+	}
+	if err != nil {
+		return Finding{Status: StatusWarn, Reason: fmt.Sprintf("could not read %s: %v", path, err)}
+	}
+	if info.IsDir() {
+		return Finding{Status: StatusCritical, Reason: fmt.Sprintf("%s is a directory, not the colony database", path)}
+	}
+
+	store, err := sqlite.Open(path)
+	if err != nil {
+		return Finding{Status: StatusWarn, Reason: fmt.Sprintf("could not open the colony database: %v", err)}
+	}
+	defer func() { _ = store.Close() }()
+
+	head, err := sqlite.HeadVersion()
+	if err != nil {
+		return Finding{Status: StatusWarn, Reason: fmt.Sprintf("could not read the head schema version: %v", err)}
+	}
+	ver, err := store.SchemaVersion(context.Background())
+	if err != nil {
+		return Finding{Status: StatusWarn, Reason: fmt.Sprintf("could not read the colony schema version: %v", err)}
+	}
+	switch {
+	case ver > head:
+		return Finding{
+			Status: StatusCritical,
+			Reason: fmt.Sprintf("colony.db is at schema %d, past this build's head %d; a newer ari wrote it", ver, head),
+			Manual: "Upgrade ari to a build that knows schema " + fmt.Sprint(ver) + " before running against this colony, or the migration walk will not recognize it.",
+		}
+	case ver < head:
+		return Finding{
+			Status: StatusWarn,
+			Reason: fmt.Sprintf("colony.db is at schema %d, behind head %d; it migrates forward on the next run", ver, head),
+		}
+	}
+
+	if wi, err := os.Stat(path + "-wal"); err == nil && wi.Size() > walWarnBytes {
+		return Finding{
+			Status: StatusWarn,
+			Reason: fmt.Sprintf("the colony write-ahead log is %d bytes, past the %d-byte checkpoint threshold, so a checkpoint is likely starved", wi.Size(), walWarnBytes),
+			Manual: "Close any stale ari session holding a read open, then run once to let the WAL checkpoint fold back into colony.db.",
+		}
+	}
+
+	return Finding{Status: StatusOK, Reason: fmt.Sprintf("colony.db is at head schema %d with a healthy write-ahead log", head)}
 }
 
 // checkLanguageServer reports the LSP surface: whether the client is enabled
