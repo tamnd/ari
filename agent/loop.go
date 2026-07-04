@@ -448,7 +448,7 @@ func (l *Loop) toolDefs() []provider.ToolDef {
 	if l.Tools == nil {
 		return nil
 	}
-	names := l.Tools.Names()
+	names := l.Tools.SchemaNames()
 	defs := make([]provider.ToolDef, 0, len(names))
 	for _, name := range names {
 		t, ok := l.Tools.Resolve(name)

@@ -87,7 +87,17 @@ type Rules struct {
 // toolWide reports whether the rule applies to the whole tool.
 func (r Rule) toolWide() bool { return r.Pattern.Content == "" }
 
-// appliesTo reports whether the rule names this tool. "*" is any tool.
+// appliesTo reports whether the rule names this tool. "*" is any tool, and
+// a trailing "*" is a prefix glob, so a rule against "sqlite__*" matches
+// every tool of the sqlite MCP server while an exact name matches one tool
+// (doc 05 section 4, the namespaced MCP tool names).
 func (r Rule) appliesTo(toolName string) bool {
-	return r.Pattern.Tool == toolName || r.Pattern.Tool == "*"
+	pat := r.Pattern.Tool
+	if pat == "*" || pat == toolName {
+		return true
+	}
+	if prefix, ok := strings.CutSuffix(pat, "*"); ok {
+		return strings.HasPrefix(toolName, prefix)
+	}
+	return false
 }

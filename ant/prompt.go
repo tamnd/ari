@@ -68,6 +68,7 @@ type Context struct {
 	ProjectMemory string // ARI.md contents, "" when the file is absent
 	Skills        string // installed skills, name plus one line, "" until their milestone
 	GitStatus     string // git status --porcelain=v1 --branch at session start
+	DeferredTools string // MCP tools announced by name only, "" when none configured
 }
 
 // BlockTwo renders the pinned index, project memory, skills, and git
@@ -108,6 +109,13 @@ func BlockTwo(c Context) provider.Message {
 		b.WriteString(c.GitStatus + "\n")
 	} else {
 		b.WriteString("Not a git repository, or git was unavailable.\n")
+	}
+
+	if c.DeferredTools != "" {
+		b.WriteString("\n## Deferred tools (MCP)\n")
+		b.WriteString("These tools are available by name only; their schemas are not loaded. ")
+		b.WriteString("Call tool_search with a keyword or an exact name to load a tool's schema before you use it.\n")
+		b.WriteString(c.DeferredTools + "\n")
 	}
 
 	b.WriteString("</system-reminder>")

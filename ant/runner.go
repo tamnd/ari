@@ -18,6 +18,7 @@ import (
 	"github.com/tamnd/ari/hook"
 	"github.com/tamnd/ari/kernel/ledger"
 	"github.com/tamnd/ari/lsp"
+	"github.com/tamnd/ari/mcp"
 	"github.com/tamnd/ari/memory"
 	"github.com/tamnd/ari/nest"
 	"github.com/tamnd/ari/permission"
@@ -113,15 +114,32 @@ func (r *Runner) Bind(c *core.Colony) {
 
 // Close tears down the runner's background resources. The colony calls it
 // on shutdown through the optional io.Closer seam, so a spawned language
-// server does not outlive the session.
+// server and every MCP server child process end with the session rather
+// than outliving it.
 func (r *Runner) Close() error {
 	r.mu.Lock()
 	svc := r.lsp
+	workers := make([]*worker, 0, len(r.workers))
+	for _, w := range r.workers {
+		workers = append(workers, w)
+	}
 	r.mu.Unlock()
 	if svc != nil {
 		svc.Shutdown()
 	}
+	for _, w := range workers {
+		if w.mcp != nil {
+			_ = w.mcp.Close()
+		}
+	}
 	return nil
+}
+
+// warn surfaces a non-fatal setup problem to the operator's terminal. An
+// MCP server that will not connect is worth a line but never a stopped
+// session, so it goes to stderr and the session proceeds.
+func (r *Runner) warn(msg string) {
+	_, _ = fmt.Fprintln(os.Stderr, "ari: "+msg)
 }
 
 // Headless swaps the interactive resolver for the resolver of last
@@ -254,6 +272,12 @@ func (r *Runner) wake(ctx context.Context, t *core.TurnHandle) (*worker, error) 
 		}
 	}
 
+	// MCP tools attach the same way, deferred: each server's tools are
+	// registered by name only and their schemas stay off turn one until the
+	// model loads one through tool_search. A server that fails to connect is
+	// a warning, not a session failure (doc 13, D20).
+	deferredMCP := r.attachMCP(ctx, cwd, reg, w)
+
 	w.loop = &agent.Loop{
 		Provider: primary.Provider,
 		Model:    primary.Model,
@@ -263,7 +287,7 @@ func (r *Runner) wake(ctx context.Context, t *core.TurnHandle) (*worker, error) 
 			Platform: runtime.GOOS + "/" + runtime.GOARCH,
 			Model:    primary.Model,
 		}),
-		Prefix:  []provider.Message{BlockTwo(r.blockTwoContext(ctx, card, primary.Provider.Caps().MaxContext, skills))},
+		Prefix:  []provider.Message{BlockTwo(r.withDeferred(r.blockTwoContext(ctx, card, primary.Provider.Caps().MaxContext, skills), deferredMCP))},
 		Tools:   reg,
 		TC:      tc,
 		Decide:  w.decide,
@@ -292,6 +316,56 @@ func (r *Runner) wake(ctx context.Context, t *core.TurnHandle) (*worker, error) 
 		pipe.Hook = bridge.preToolDecide
 	}
 	return w, nil
+}
+
+// attachMCP loads the MCP configuration, connects to every configured
+// server, and registers each advertised tool deferred so it rides turn one
+// by name only. It registers the tool_search built-in only when a server
+// actually produced a tool, so a session with no MCP config never sees it.
+// It returns the by-name announce block for block two, empty when nothing
+// is configured. A connection failure is a warning, never a session error.
+func (r *Runner) attachMCP(ctx context.Context, cwd string, reg *tool.Registry, w *worker) string {
+	cfg, err := mcp.Discover(mcp.Options{Root: r.nest.Root, Cwd: cwd, GlobalDir: r.nest.Global})
+	if err != nil {
+		r.warn("mcp config: " + err.Error())
+		return ""
+	}
+	if len(cfg.Servers) == 0 {
+		return ""
+	}
+
+	bridge := mcp.Setup(context.WithoutCancel(ctx), cfg)
+	for _, warn := range bridge.Warnings {
+		r.warn(warn)
+	}
+	tools := bridge.Tools()
+	if len(tools) == 0 {
+		_ = bridge.Close()
+		return ""
+	}
+	w.mcp = bridge
+
+	var names []string
+	for _, t := range tools {
+		if err := reg.RegisterDeferred(t); err != nil {
+			r.warn("mcp tool: " + err.Error())
+			continue
+		}
+		names = append(names, "- "+t.Name())
+	}
+	if len(names) == 0 {
+		return ""
+	}
+	if err := reg.Register(tool.NewToolSearch(reg)); err != nil {
+		r.warn("registering tool_search: " + err.Error())
+	}
+	return strings.Join(names, "\n")
+}
+
+// withDeferred folds the MCP announce block into a block-two context.
+func (r *Runner) withDeferred(c Context, deferred string) Context {
+	c.DeferredTools = deferred
+	return c
 }
 
 // hookBridge adapts the hook dispatcher to the loop's agent.Hooks seam, so the
@@ -466,6 +540,7 @@ type worker struct {
 	asks        Asker
 	headless    bool
 	turnID      string
+	mcp         *mcp.Bridge // nil when no MCP server is configured
 }
 
 // resolve blocks the pipeline's Ask on the client's answer. A headless
