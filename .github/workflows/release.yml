@@ -27,7 +27,7 @@ jobs:
     if: github.ref_type != 'tag'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7.0.0
+      - uses: actions/checkout@v7.0.1
         with:
           fetch-depth: 0
       - uses: actions/setup-go@v6.5.0
@@ -52,7 +52,7 @@ jobs:
     env:
       LINUX_REPO_DISPATCH_TOKEN: ${{ secrets.LINUX_REPO_DISPATCH_TOKEN }}
     steps:
-      - uses: actions/checkout@v7.0.0
+      - uses: actions/checkout@v7.0.1
         with:
           fetch-depth: 0
       - uses: actions/setup-go@v6.5.0
